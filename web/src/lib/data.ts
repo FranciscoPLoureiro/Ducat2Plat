@@ -3,6 +3,7 @@ import { getSupabase } from "./supabase";
 const VELOCITY_DAYS = 14;
 const VELOCITY_LIQUID = 15;
 const PPD_N = 6;
+const DEFAULT_JUNK_RATE = 0.35;
 
 export interface RankedItem {
   id: string;
@@ -232,4 +233,361 @@ export async function getRankedItems(): Promise<RankedItem[]> {
 
   results.sort((a, b) => b.score - a.score);
   return results;
+}
+
+export interface BundleSeller {
+  seller_name: string;
+  items: {
+    item_name: string;
+    url_name: string;
+    ducats: number;
+    price: number;
+    quantity: number;
+  }[];
+  total_ducats: number;
+  total_plat: number;
+  combined_ppd: number;
+}
+
+export async function getBundles(): Promise<BundleSeller[]> {
+  const db = getSupabase();
+  const sweepId = await getLatestSweepId();
+  if (!sweepId) return [];
+
+  const { data: orders } = await db
+    .from("order_snapshots")
+    .select("item_id, price, quantity, seller_name")
+    .eq("sweep_id", sweepId)
+    .order("price", { ascending: true });
+
+  if (!orders?.length) return [];
+
+  const itemIds = [...new Set(orders.map((o) => o.item_id))];
+
+  const itemMap = new Map<string, { item_name: string; url_name: string; ducats: number }>();
+  const CHUNK = 200;
+  for (let i = 0; i < itemIds.length; i += CHUNK) {
+    const chunk = itemIds.slice(i, i + CHUNK);
+    const { data: items } = await db
+      .from("prime_items")
+      .select("id, item_name, url_name, ducats")
+      .in("id", chunk)
+      .not("ducats", "is", null);
+    if (items) {
+      for (const it of items) {
+        itemMap.set(it.id, { item_name: it.item_name, url_name: it.url_name, ducats: it.ducats as number });
+      }
+    }
+  }
+
+  const sellerItems = new Map<string, BundleSeller["items"]>();
+  for (const o of orders) {
+    const item = itemMap.get(o.item_id);
+    if (!item) continue;
+    if (!sellerItems.has(o.seller_name)) sellerItems.set(o.seller_name, []);
+    const existing = sellerItems.get(o.seller_name)!;
+    if (!existing.some((e) => e.url_name === item.url_name)) {
+      existing.push({
+        item_name: item.item_name,
+        url_name: item.url_name,
+        ducats: item.ducats,
+        price: o.price,
+        quantity: o.quantity,
+      });
+    }
+  }
+
+  const results: BundleSeller[] = [];
+  for (const [seller_name, items] of sellerItems) {
+    if (items.length < 2) continue;
+    const total_ducats = items.reduce((s, i) => s + i.ducats, 0);
+    const total_plat = items.reduce((s, i) => s + i.price, 0);
+    const combined_ppd = total_plat > 0 ? total_ducats / total_plat : 0;
+    results.push({ seller_name, items, total_ducats, total_plat, combined_ppd });
+  }
+
+  results.sort((a, b) => b.combined_ppd - a.combined_ppd);
+  return results;
+}
+
+export interface BaroVisit {
+  id: number;
+  arrival: string;
+  departure: string;
+  relay: string | null;
+  items: BaroVisitItem[];
+}
+
+export interface BaroVisitItem {
+  item_name: string;
+  ducat_cost: number;
+  credit_cost: number;
+  item_id: string | null;
+  url_name: string | null;
+  is_primed_mod: boolean;
+  resale_median: number | null;
+  roi: number | null;
+}
+
+export async function getBaroVisits(): Promise<BaroVisit[]> {
+  const db = getSupabase();
+
+  const { data: visits } = await db
+    .from("baro_visits")
+    .select("id, arrival, departure, relay")
+    .order("arrival", { ascending: false })
+    .limit(20);
+
+  if (!visits?.length) return [];
+
+  const visitIds = visits.map((v) => v.id);
+  const { data: visitItems } = await db
+    .from("baro_visit_items")
+    .select("visit_id, item_name, ducat_cost, credit_cost, item_id")
+    .in("visit_id", visitIds);
+
+  const itemIds = (visitItems ?? [])
+    .map((vi) => vi.item_id)
+    .filter((id): id is string => id !== null);
+
+  const primeItemMap = new Map<string, { url_name: string; is_primed_mod: boolean }>();
+  if (itemIds.length > 0) {
+    const CHUNK = 200;
+    for (let i = 0; i < itemIds.length; i += CHUNK) {
+      const chunk = itemIds.slice(i, i + CHUNK);
+      const { data: items } = await db
+        .from("prime_items")
+        .select("id, url_name, is_primed_mod")
+        .in("id", chunk);
+      if (items) {
+        for (const it of items) {
+          primeItemMap.set(it.id, { url_name: it.url_name, is_primed_mod: it.is_primed_mod });
+        }
+      }
+    }
+  }
+
+  const primedModIds = [...primeItemMap.entries()]
+    .filter(([, v]) => v.is_primed_mod)
+    .map(([id]) => id);
+
+  const resaleMap = new Map<string, number>();
+  if (primedModIds.length > 0) {
+    const CHUNK = 200;
+    for (let i = 0; i < primedModIds.length; i += CHUNK) {
+      const chunk = primedModIds.slice(i, i + CHUNK);
+      const { data: stats } = await db
+        .from("trade_stats")
+        .select("item_id, median, stat_date")
+        .in("item_id", chunk)
+        .eq("mod_rank", 0)
+        .order("stat_date", { ascending: false });
+      if (stats) {
+        for (const s of stats) {
+          if (!resaleMap.has(s.item_id) && s.median > 0) {
+            resaleMap.set(s.item_id, Number(s.median));
+          }
+        }
+      }
+    }
+  }
+
+  const visitItemsByVisit = new Map<number, typeof visitItems>();
+  for (const vi of visitItems ?? []) {
+    if (!visitItemsByVisit.has(vi.visit_id)) visitItemsByVisit.set(vi.visit_id, []);
+    visitItemsByVisit.get(vi.visit_id)!.push(vi);
+  }
+
+  return visits.map((v) => {
+    const rawItems = visitItemsByVisit.get(v.id) ?? [];
+    const items: BaroVisitItem[] = rawItems.map((vi) => {
+      const primeItem = vi.item_id ? primeItemMap.get(vi.item_id) : null;
+      const is_primed_mod = primeItem?.is_primed_mod ?? false;
+      const resale_median = vi.item_id ? (resaleMap.get(vi.item_id) ?? null) : null;
+      const roi =
+        is_primed_mod && resale_median !== null
+          ? resale_median - vi.ducat_cost / DEFAULT_JUNK_RATE
+          : null;
+      return {
+        item_name: vi.item_name,
+        ducat_cost: vi.ducat_cost,
+        credit_cost: vi.credit_cost,
+        item_id: vi.item_id,
+        url_name: primeItem?.url_name ?? null,
+        is_primed_mod,
+        resale_median,
+        roi,
+      };
+    });
+    items.sort((a, b) => (b.roi ?? -Infinity) - (a.roi ?? -Infinity));
+    return {
+      id: v.id,
+      arrival: v.arrival,
+      departure: v.departure,
+      relay: v.relay,
+      items,
+    };
+  });
+}
+
+export interface BaroItemHistory {
+  item_name: string;
+  visits: { arrival: string; visits_ago: number }[];
+}
+
+export async function getBaroItemHistory(): Promise<BaroItemHistory[]> {
+  const db = getSupabase();
+
+  const { data: visits } = await db
+    .from("baro_visits")
+    .select("id, arrival")
+    .order("arrival", { ascending: false });
+
+  if (!visits?.length) return [];
+
+  const visitIds = visits.map((v) => v.id);
+  const { data: allItems } = await db
+    .from("baro_visit_items")
+    .select("visit_id, item_name")
+    .in("visit_id", visitIds);
+
+  if (!allItems?.length) return [];
+
+  const visitIndexMap = new Map<number, number>();
+  visits.forEach((v, i) => visitIndexMap.set(v.id, i));
+
+  const itemVisits = new Map<string, { arrival: string; visits_ago: number }[]>();
+  for (const vi of allItems) {
+    const idx = visitIndexMap.get(vi.visit_id);
+    if (idx === undefined) continue;
+    if (!itemVisits.has(vi.item_name)) itemVisits.set(vi.item_name, []);
+    itemVisits.get(vi.item_name)!.push({
+      arrival: visits[idx].arrival,
+      visits_ago: idx,
+    });
+  }
+
+  const results: BaroItemHistory[] = [];
+  for (const [item_name, v] of itemVisits) {
+    v.sort((a, b) => a.visits_ago - b.visits_ago);
+    results.push({ item_name, visits: v });
+  }
+  results.sort((a, b) => a.visits[0].visits_ago - b.visits[0].visits_ago);
+  return results;
+}
+
+export interface VaultEvent {
+  event: "vaulted" | "unvaulted" | "resurgence";
+  effective_date: string;
+}
+
+export interface ItemDetail {
+  id: string;
+  url_name: string;
+  item_name: string;
+  ducats: number | null;
+  is_primed_mod: boolean;
+  vaulted: boolean;
+  max_mod_rank: number | null;
+  stats: { stat_date: string; median: number; volume: number; mod_rank: number }[];
+  vault_events: VaultEvent[];
+  baro_visit_dates: string[];
+}
+
+export async function getItemDetail(url_name: string): Promise<ItemDetail | null> {
+  const db = getSupabase();
+
+  const { data: item } = await db
+    .from("prime_items")
+    .select("id, url_name, item_name, ducats, is_primed_mod, vaulted, max_mod_rank")
+    .eq("url_name", url_name)
+    .single();
+
+  if (!item) return null;
+
+  const [statsResult, vaultResult, baroResult] = await Promise.all([
+    db
+      .from("trade_stats")
+      .select("stat_date, median, volume, mod_rank")
+      .eq("item_id", item.id)
+      .order("stat_date", { ascending: true }),
+    db
+      .from("vault_events")
+      .select("event, effective_date")
+      .eq("item_id", item.id)
+      .order("effective_date", { ascending: true }),
+    db
+      .from("baro_visits")
+      .select("arrival")
+      .order("arrival", { ascending: true }),
+  ]);
+
+  return {
+    id: item.id,
+    url_name: item.url_name,
+    item_name: item.item_name,
+    ducats: item.ducats,
+    is_primed_mod: item.is_primed_mod,
+    vaulted: item.vaulted,
+    max_mod_rank: item.max_mod_rank,
+    stats: (statsResult.data ?? []).map((s) => ({
+      stat_date: s.stat_date,
+      median: Number(s.median),
+      volume: Number(s.volume ?? 0),
+      mod_rank: s.mod_rank,
+    })),
+    vault_events: (vaultResult.data ?? []) as VaultEvent[],
+    baro_visit_dates: (baroResult.data ?? []).map((v) => v.arrival),
+  };
+}
+
+export interface PrimedModStats {
+  item_name: string;
+  url_name: string;
+  item_id: string;
+  stats: { stat_date: string; median: number; volume: number }[];
+}
+
+export async function getPrimedModStats(): Promise<PrimedModStats[]> {
+  const db = getSupabase();
+
+  const { data: mods } = await db
+    .from("prime_items")
+    .select("id, item_name, url_name")
+    .eq("is_primed_mod", true);
+
+  if (!mods?.length) return [];
+
+  const modIds = mods.map((m) => m.id);
+  const allStats: { item_id: string; stat_date: string; median: number; volume: number }[] = [];
+  const CHUNK = 200;
+  for (let i = 0; i < modIds.length; i += CHUNK) {
+    const chunk = modIds.slice(i, i + CHUNK);
+    const { data: stats } = await db
+      .from("trade_stats")
+      .select("item_id, stat_date, median, volume")
+      .in("item_id", chunk)
+      .eq("mod_rank", 0)
+      .order("stat_date", { ascending: true });
+    if (stats) allStats.push(...stats);
+  }
+
+  const statsByMod = new Map<string, typeof allStats>();
+  for (const s of allStats) {
+    if (!statsByMod.has(s.item_id)) statsByMod.set(s.item_id, []);
+    statsByMod.get(s.item_id)!.push(s);
+  }
+
+  return mods
+    .map((m) => ({
+      item_name: m.item_name,
+      url_name: m.url_name,
+      item_id: m.id,
+      stats: (statsByMod.get(m.id) ?? []).map((s) => ({
+        stat_date: s.stat_date,
+        median: Number(s.median),
+        volume: Number(s.volume ?? 0),
+      })),
+    }))
+    .filter((m) => m.stats.length > 0);
 }

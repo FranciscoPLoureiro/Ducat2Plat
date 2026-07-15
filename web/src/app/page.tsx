@@ -19,7 +19,7 @@ export default async function Home() {
       )}
 
       <header className="flex items-center justify-between mb-6">
-        <h1 className="text-2xl font-bold tracking-tight">Ducat2Plat</h1>
+        <h1 className="text-xl font-bold tracking-tight">Junk Ranking</h1>
         <BaroWidget baro={baro} />
       </header>
 
