@@ -19,7 +19,7 @@ jobs:
 
       - uses: actions/setup-node@v4
         with:
-          node-version: 20
+          node-version: 22
 
       - name: Install dependencies
         working-directory: worker
@@ -35,7 +35,13 @@ jobs:
   keepalive:
     runs-on: ubuntu-latest
     permissions:
-      actions: write
+      contents: write
     steps:
       - uses: actions/checkout@v4
-      - uses: gautamkrishnar/keepalive-workflow@v2
+      - name: Keepalive commit
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git switch --orphan keepalive 2>/dev/null || git switch keepalive
+          git commit --allow-empty -m "keepalive $(date -u +%Y-%m-%dT%H:%M:%SZ)"
+          git push origin keepalive --force
