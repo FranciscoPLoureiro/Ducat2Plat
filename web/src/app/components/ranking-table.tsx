@@ -1,6 +1,7 @@
 "use client";
 
 import { useState } from "react";
+import Link from "next/link";
 import type { RankedItem } from "@/lib/data";
 
 export default function RankingTable({ items }: { items: RankedItem[] }) {
@@ -76,7 +77,13 @@ function ItemRow({
           <span className="mr-2 text-zinc-500 text-xs">
             {isExpanded ? "▼" : "▶"}
           </span>
-          {item.item_name}
+          <Link
+            href={`/item/${item.url_name}`}
+            className="hover:text-emerald-400 transition-colors"
+            onClick={(e) => e.stopPropagation()}
+          >
+            {item.item_name}
+          </Link>
         </td>
         <td className="py-2 px-3 text-right text-amber-400">{item.ducats}</td>
         <td className="py-2 px-3 text-right">{item.median}p</td>
