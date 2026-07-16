@@ -12,7 +12,7 @@ import PrimedModCharts from "../components/primed-mod-charts";
 export const dynamic = "force-dynamic";
 
 export default async function BaroPage() {
-  const [staleness, countdown, visits, itemHistory, primedMods] =
+  const [staleness, countdown, baroResult, itemHistory, primedMods] =
     await Promise.all([
       getStaleness(),
       getBaroCountdown(),
@@ -21,12 +21,7 @@ export default async function BaroPage() {
       getPrimedModStats(),
     ]);
 
-  const activeVisit = visits.find((v) => {
-    const now = Date.now();
-    const arr = new Date(v.arrival).getTime();
-    const dep = new Date(v.departure).getTime();
-    return now >= arr && now < dep;
-  });
+  const { visits, junkRate, activeVisit } = baroResult;
 
   const baroVisitDates = visits.map((v) => v.arrival);
 
@@ -53,7 +48,12 @@ export default async function BaroPage() {
               </span>
             )}
           </h2>
-          <BaroInventory items={activeVisit.items} />
+          {activeVisit.is_special && (
+            <div className="mb-3 px-4 py-2 rounded bg-purple-900/40 border border-purple-700 text-purple-200 text-sm">
+              Special visit ({activeVisit.items.length} items) — excluded from recurrence stats.
+            </div>
+          )}
+          <BaroInventory items={activeVisit.items} junkRate={junkRate} />
         </section>
       )}
 
@@ -84,11 +84,22 @@ function BaroCountdownWidget({
   countdown: Awaited<ReturnType<typeof getBaroCountdown>>;
 }) {
   if (countdown.active) {
+    const depDate = countdown.departure
+      ? new Date(countdown.departure).toLocaleDateString("en-US", {
+          month: "short",
+          day: "numeric",
+          hour: "numeric",
+          minute: "2-digit",
+        })
+      : null;
     return (
       <div className="flex items-center gap-2 px-3 py-2 rounded bg-emerald-900/40 border border-emerald-700 text-emerald-300 text-sm">
         <span className="font-semibold">Baro is HERE</span>
         {countdown.relay && (
           <span className="text-emerald-500">@ {countdown.relay}</span>
+        )}
+        {depDate && (
+          <span className="text-emerald-500/70">until {depDate}</span>
         )}
       </div>
     );

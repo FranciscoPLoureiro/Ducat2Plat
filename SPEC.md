@@ -194,9 +194,11 @@ One command, idempotent, safe to re-run. Flow:
    starts with "Primed "). This is expensive only on the very first run (~3k detail
    calls ≈ 20 min); afterwards only new items trigger detail calls.
 3. **Statistics**: for every item with `ducats is not null` OR `is_primed_mod`:
-   `GET .../statistics`, upsert the last ~7 daily rows of `statistics_closed.90days`
-   into `trade_stats` (upsert makes overlap harmless; 7-day window self-heals missed
-   days). For mods, one row per `mod_rank` present. ~600–700 requests ≈ 5 min.
+   `GET .../statistics`, upsert **all available daily rows** from
+   `statistics_closed.90days` into `trade_stats` (upserts are idempotent so
+   overlap is harmless; upserting the full ~90-day window backfills any gaps and
+   builds the long-term archive on every run). For mods, one row per `mod_rank`
+   present. ~600–700 requests ≈ 5 min.
 4. **Order depth for candidates**: compute preliminary PpD = `ducats / median` from
    the freshest `trade_stats` row; take the **top 60 items**. For each:
    `GET .../orders`, keep `order_type = 'sell'` AND `user.status = 'ingame'` only,
@@ -240,9 +242,11 @@ Ducat values are fixed game constants per item; all volatility is in the plat pr
    combined PpD for buying their whole basket. This view is the project's main
    differentiator — do not cut it.
 5. **Baro ROI (per visit, while active)** — for each visit item matched to a
-   Primed mod: `resale_median (rank 0!) − plat_value_of(ducat_cost)` where
-   `plat_value_of` uses the user's achievable junk rate (default 0.35 p/ducat,
-   configurable). Show `credit_cost` alongside. **Always compare rank-0 resale**
+   Primed mod: `resale_median (rank 0!) − ducat_cost × junk_rate` where
+   `junk_rate = 1 / (median PpD@6 of the top 20 ranked items with depth data)`,
+   falling back to `0.10 p/ducat` when no depth data exists. The rate is
+   computed live from the current sweep's order book, not hardcoded.
+   Show `credit_cost` alongside. **Always compare rank-0 resale**
    — rank-10 prices embed Endo/credit investment and are a different market.
 6. **Ducat shopping list** — user inputs current ducats + target; dashboard emits
    tonight's cheapest in-game path to the shortfall using PpD@N + bundles.

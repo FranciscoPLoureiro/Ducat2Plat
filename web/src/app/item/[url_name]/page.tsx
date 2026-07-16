@@ -58,7 +58,6 @@ export default async function ItemPage({
         stats={item.stats}
         vault_events={item.vault_events}
         baro_visit_dates={item.baro_visit_dates}
-        max_mod_rank={item.max_mod_rank}
       />
 
       {item.vault_events.length > 0 && (

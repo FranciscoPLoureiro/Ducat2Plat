@@ -30,12 +30,10 @@ export default function ItemDetailChart({
   stats,
   vault_events,
   baro_visit_dates,
-  max_mod_rank,
 }: {
   stats: ItemDetail["stats"];
   vault_events: VaultEvent[];
   baro_visit_dates: string[];
-  max_mod_rank: number | null;
 }) {
   const modRanks = useMemo(() => {
     const ranks = [...new Set(stats.map((s) => s.mod_rank))].sort(
