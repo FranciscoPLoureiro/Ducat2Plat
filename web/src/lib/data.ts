@@ -3,7 +3,28 @@ import { getSupabase } from "./supabase";
 const VELOCITY_DAYS = 14;
 const VELOCITY_LIQUID = 15;
 const PPD_N = 6;
-const DEFAULT_JUNK_RATE = 0.35;
+const JUNK_RATE_FALLBACK = 0.10;
+const RESALE_WINDOW_DAYS = 30;
+
+// PostgREST silently caps every query at 1000 rows; queries that can exceed
+// that must paginate. The page factory MUST apply a deterministic order.
+const PAGE_SIZE = 1000;
+async function fetchAll<T>(
+  page: (from: number, to: number) => PromiseLike<{ data: T[] | null }>,
+): Promise<T[]> {
+  const all: T[] = [];
+  for (let from = 0; ; from += PAGE_SIZE) {
+    const { data } = await page(from, from + PAGE_SIZE - 1);
+    if (!data?.length) break;
+    all.push(...data);
+    if (data.length < PAGE_SIZE) break;
+  }
+  return all;
+}
+
+function daysAgoDate(days: number): string {
+  return new Date(Date.now() - days * 86_400_000).toISOString().slice(0, 10);
+}
 
 export interface RankedItem {
   id: string;
@@ -118,6 +139,7 @@ export async function getRankedItems(): Promise<RankedItem[]> {
 
   const itemIds = items.map((i) => i.id);
 
+  const velocityCutoff = daysAgoDate(VELOCITY_DAYS);
   const allStats: Array<{
     item_id: string;
     stat_date: string;
@@ -128,13 +150,18 @@ export async function getRankedItems(): Promise<RankedItem[]> {
   const CHUNK = 200;
   for (let i = 0; i < itemIds.length; i += CHUNK) {
     const chunk = itemIds.slice(i, i + CHUNK);
-    const { data: statsRows } = await db
-      .from("trade_stats")
-      .select("item_id, stat_date, median, volume, mod_rank")
-      .in("item_id", chunk)
-      .eq("mod_rank", -1)
-      .order("stat_date", { ascending: false });
-    if (statsRows) allStats.push(...statsRows);
+    const statsRows = await fetchAll<(typeof allStats)[number]>((from, to) =>
+      db
+        .from("trade_stats")
+        .select("item_id, stat_date, median, volume, mod_rank")
+        .in("item_id", chunk)
+        .eq("mod_rank", -1)
+        .gte("stat_date", velocityCutoff)
+        .order("stat_date", { ascending: false })
+        .order("item_id", { ascending: true })
+        .range(from, to),
+    );
+    allStats.push(...statsRows);
   }
 
   const latestMedian = new Map<string, number>();
@@ -157,13 +184,18 @@ export async function getRankedItems(): Promise<RankedItem[]> {
   }> = [];
   for (let i = 0; i < itemIds.length; i += CHUNK) {
     const chunk = itemIds.slice(i, i + CHUNK);
-    const { data: orderRows } = await db
-      .from("order_snapshots")
-      .select("item_id, price, quantity, mod_rank, seller_name")
-      .eq("sweep_id", sweepId)
-      .in("item_id", chunk)
-      .order("price", { ascending: true });
-    if (orderRows) allOrders.push(...orderRows);
+    const orderRows = await fetchAll<(typeof allOrders)[number] & { id: number }>(
+      (from, to) =>
+        db
+          .from("order_snapshots")
+          .select("id, item_id, price, quantity, mod_rank, seller_name")
+          .eq("sweep_id", sweepId)
+          .in("item_id", chunk)
+          .order("price", { ascending: true })
+          .order("id", { ascending: true })
+          .range(from, to),
+    );
+    allOrders.push(...orderRows);
   }
 
   const ordersByItem = new Map<string, typeof allOrders>();
@@ -181,11 +213,10 @@ export async function getRankedItems(): Promise<RankedItem[]> {
     const ducats = item.ducats as number;
     const ppd = ducats / median;
 
-    const volumes = (volumeByItem.get(item.id) ?? []).slice(0, VELOCITY_DAYS);
-    const velocity =
-      volumes.length > 0
-        ? volumes.reduce((a, b) => a + b, 0) / volumes.length
-        : 0;
+    // Rows are already limited to the trailing window; days with no trades
+    // have no row, so divide by the full window for a true per-day rate.
+    const volumes = volumeByItem.get(item.id) ?? [];
+    const velocity = volumes.reduce((a, b) => a + b, 0) / VELOCITY_DAYS;
 
     const orders = ordersByItem.get(item.id) ?? [];
     let ppd_at_n: number | null = null;
@@ -235,6 +266,20 @@ export async function getRankedItems(): Promise<RankedItem[]> {
   return results;
 }
 
+export async function computeJunkRate(): Promise<number> {
+  const items = await getRankedItems();
+  const withDepth = items.filter((i) => i.ppd_at_n !== null && !i.shallow);
+  const top = withDepth.slice(0, 20);
+  if (top.length === 0) return JUNK_RATE_FALLBACK;
+  const values = top.map((i) => i.ppd_at_n!).sort((a, b) => a - b);
+  const mid = Math.floor(values.length / 2);
+  const median =
+    values.length % 2 === 0
+      ? (values[mid - 1] + values[mid]) / 2
+      : values[mid];
+  return 1 / median;
+}
+
 export interface BundleSeller {
   seller_name: string;
   items: {
@@ -254,13 +299,23 @@ export async function getBundles(): Promise<BundleSeller[]> {
   const sweepId = await getLatestSweepId();
   if (!sweepId) return [];
 
-  const { data: orders } = await db
-    .from("order_snapshots")
-    .select("item_id, price, quantity, seller_name")
-    .eq("sweep_id", sweepId)
-    .order("price", { ascending: true });
+  const orders = await fetchAll<{
+    id: number;
+    item_id: string;
+    price: number;
+    quantity: number;
+    seller_name: string;
+  }>((from, to) =>
+    db
+      .from("order_snapshots")
+      .select("id, item_id, price, quantity, seller_name")
+      .eq("sweep_id", sweepId)
+      .order("price", { ascending: true })
+      .order("id", { ascending: true })
+      .range(from, to),
+  );
 
-  if (!orders?.length) return [];
+  if (!orders.length) return [];
 
   const itemIds = [...new Set(orders.map((o) => o.item_id))];
 
@@ -315,7 +370,12 @@ export interface BaroVisit {
   arrival: string;
   departure: string;
   relay: string | null;
+  is_special: boolean;
   items: BaroVisitItem[];
+}
+
+function isSpecialVisit(relay: string | null, itemCount: number): boolean {
+  return (relay != null && /tennocon/i.test(relay)) || itemCount >= 150;
 }
 
 export interface BaroVisitItem {
@@ -329,8 +389,9 @@ export interface BaroVisitItem {
   roi: number | null;
 }
 
-export async function getBaroVisits(): Promise<BaroVisit[]> {
+export async function getBaroVisits(): Promise<{ visits: BaroVisit[]; junkRate: number; activeVisit: BaroVisit | null }> {
   const db = getSupabase();
+  const junkRate = await computeJunkRate();
 
   const { data: visits } = await db
     .from("baro_visits")
@@ -338,13 +399,24 @@ export async function getBaroVisits(): Promise<BaroVisit[]> {
     .order("arrival", { ascending: false })
     .limit(20);
 
-  if (!visits?.length) return [];
+  if (!visits?.length) return { visits: [], junkRate, activeVisit: null };
 
   const visitIds = visits.map((v) => v.id);
-  const { data: visitItems } = await db
-    .from("baro_visit_items")
-    .select("visit_id, item_name, ducat_cost, credit_cost, item_id")
-    .in("visit_id", visitIds);
+  const visitItems = await fetchAll<{
+    visit_id: number;
+    item_name: string;
+    ducat_cost: number;
+    credit_cost: number;
+    item_id: string | null;
+  }>((from, to) =>
+    db
+      .from("baro_visit_items")
+      .select("visit_id, item_name, ducat_cost, credit_cost, item_id")
+      .in("visit_id", visitIds)
+      .order("visit_id", { ascending: true })
+      .order("item_name", { ascending: true })
+      .range(from, to),
+  );
 
   const itemIds = (visitItems ?? [])
     .map((vi) => vi.item_id)
@@ -373,20 +445,28 @@ export async function getBaroVisits(): Promise<BaroVisit[]> {
 
   const resaleMap = new Map<string, number>();
   if (primedModIds.length > 0) {
+    const resaleCutoff = daysAgoDate(RESALE_WINDOW_DAYS);
     const CHUNK = 200;
     for (let i = 0; i < primedModIds.length; i += CHUNK) {
       const chunk = primedModIds.slice(i, i + CHUNK);
-      const { data: stats } = await db
-        .from("trade_stats")
-        .select("item_id, median, stat_date")
-        .in("item_id", chunk)
-        .eq("mod_rank", 0)
-        .order("stat_date", { ascending: false });
-      if (stats) {
-        for (const s of stats) {
-          if (!resaleMap.has(s.item_id) && s.median > 0) {
-            resaleMap.set(s.item_id, Number(s.median));
-          }
+      const stats = await fetchAll<{
+        item_id: string;
+        median: number;
+        stat_date: string;
+      }>((from, to) =>
+        db
+          .from("trade_stats")
+          .select("item_id, median, stat_date")
+          .in("item_id", chunk)
+          .eq("mod_rank", 0)
+          .gte("stat_date", resaleCutoff)
+          .order("stat_date", { ascending: false })
+          .order("item_id", { ascending: true })
+          .range(from, to),
+      );
+      for (const s of stats) {
+        if (!resaleMap.has(s.item_id) && s.median > 0) {
+          resaleMap.set(s.item_id, Number(s.median));
         }
       }
     }
@@ -398,7 +478,7 @@ export async function getBaroVisits(): Promise<BaroVisit[]> {
     visitItemsByVisit.get(vi.visit_id)!.push(vi);
   }
 
-  return visits.map((v) => {
+  const result = visits.map((v) => {
     const rawItems = visitItemsByVisit.get(v.id) ?? [];
     const items: BaroVisitItem[] = rawItems.map((vi) => {
       const primeItem = vi.item_id ? primeItemMap.get(vi.item_id) : null;
@@ -406,7 +486,7 @@ export async function getBaroVisits(): Promise<BaroVisit[]> {
       const resale_median = vi.item_id ? (resaleMap.get(vi.item_id) ?? null) : null;
       const roi =
         is_primed_mod && resale_median !== null
-          ? resale_median - vi.ducat_cost / DEFAULT_JUNK_RATE
+          ? resale_median - vi.ducat_cost * junkRate
           : null;
       return {
         item_name: vi.item_name,
@@ -425,9 +505,18 @@ export async function getBaroVisits(): Promise<BaroVisit[]> {
       arrival: v.arrival,
       departure: v.departure,
       relay: v.relay,
+      is_special: isSpecialVisit(v.relay, rawItems.length),
       items,
     };
   });
+  const now = Date.now();
+  const active = result.find((v) => {
+    const arr = new Date(v.arrival).getTime();
+    const dep = new Date(v.departure).getTime();
+    return now >= arr && now < dep;
+  }) ?? null;
+
+  return { visits: result, junkRate, activeVisit: active };
 }
 
 export interface BaroItemHistory {
@@ -438,20 +527,30 @@ export interface BaroItemHistory {
 export async function getBaroItemHistory(): Promise<BaroItemHistory[]> {
   const db = getSupabase();
 
-  const { data: visits } = await db
+  const { data: allVisits } = await db
     .from("baro_visits")
-    .select("id, arrival")
+    .select("id, arrival, relay")
     .order("arrival", { ascending: false });
+
+  if (!allVisits?.length) return [];
+
+  const visits = allVisits.filter((v) => !isSpecialVisit(v.relay, 0));
 
   if (!visits?.length) return [];
 
   const visitIds = visits.map((v) => v.id);
-  const { data: allItems } = await db
-    .from("baro_visit_items")
-    .select("visit_id, item_name")
-    .in("visit_id", visitIds);
+  const allItems = await fetchAll<{ visit_id: number; item_name: string }>(
+    (from, to) =>
+      db
+        .from("baro_visit_items")
+        .select("visit_id, item_name")
+        .in("visit_id", visitIds)
+        .order("visit_id", { ascending: true })
+        .order("item_name", { ascending: true })
+        .range(from, to),
+  );
 
-  if (!allItems?.length) return [];
+  if (!allItems.length) return [];
 
   const visitIndexMap = new Map<number, number>();
   visits.forEach((v, i) => visitIndexMap.set(v.id, i));
@@ -563,13 +662,17 @@ export async function getPrimedModStats(): Promise<PrimedModStats[]> {
   const CHUNK = 200;
   for (let i = 0; i < modIds.length; i += CHUNK) {
     const chunk = modIds.slice(i, i + CHUNK);
-    const { data: stats } = await db
-      .from("trade_stats")
-      .select("item_id, stat_date, median, volume")
-      .in("item_id", chunk)
-      .eq("mod_rank", 0)
-      .order("stat_date", { ascending: true });
-    if (stats) allStats.push(...stats);
+    const stats = await fetchAll<(typeof allStats)[number]>((from, to) =>
+      db
+        .from("trade_stats")
+        .select("item_id, stat_date, median, volume")
+        .in("item_id", chunk)
+        .eq("mod_rank", 0)
+        .order("stat_date", { ascending: true })
+        .order("item_id", { ascending: true })
+        .range(from, to),
+    );
+    allStats.push(...stats);
   }
 
   const statsByMod = new Map<string, typeof allStats>();

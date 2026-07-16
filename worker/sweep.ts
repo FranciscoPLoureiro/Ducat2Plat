@@ -172,25 +172,17 @@ async function fetchStats(
         continue;
       }
 
-      const dates = [
-        ...new Set(closed.map((r: any) => r.datetime.slice(0, 10))),
-      ];
-      dates.sort();
-      const recent = new Set(dates.slice(-7));
-
-      const rows = closed
-        .filter((r: any) => recent.has(r.datetime.slice(0, 10)))
-        .map((r: any) => ({
-          item_id: item.id,
-          stat_date: r.datetime.slice(0, 10),
-          mod_rank: r.mod_rank ?? -1,
-          volume: r.volume,
-          median: r.median,
-          avg_price: r.avg_price,
-          min_price: r.min_price,
-          max_price: r.max_price,
-          sweep_id: sweepId,
-        }));
+      const rows = closed.map((r: any) => ({
+        item_id: item.id,
+        stat_date: r.datetime.slice(0, 10),
+        mod_rank: r.mod_rank ?? -1,
+        volume: r.volume,
+        median: r.median,
+        avg_price: r.avg_price,
+        min_price: r.min_price,
+        max_price: r.max_price,
+        sweep_id: sweepId,
+      }));
 
       if (rows.length) {
         const { error: err } = await db
@@ -340,13 +332,16 @@ async function fetchBaro(): Promise<void> {
     data.active === true ||
     (new Date(arrival).getTime() <= now && now < new Date(departure).getTime());
 
+  const isSpecial =
+    (relay && /tennocon/i.test(relay)) || false;
+
   // Upsert visit keyed on arrival
+  const visitPayload: Record<string, unknown> = { arrival, departure, relay };
+  if (isSpecial) visitPayload.is_special = true;
+
   const { data: visitRow, error: visitErr } = await db
     .from("baro_visits")
-    .upsert(
-      { arrival, departure, relay },
-      { onConflict: "arrival" },
-    )
+    .upsert(visitPayload, { onConflict: "arrival" })
     .select("id")
     .single();
 
@@ -406,6 +401,16 @@ async function fetchBaro(): Promise<void> {
     console.warn(`Baro items upsert: ${itemsErr.message}`);
   } else {
     console.log(`Baro: ${rows.length} items upserted`);
+  }
+
+  if (!isSpecial && rows.length >= 150) {
+    const { error: flagErr } = await db
+      .from("baro_visits")
+      .update({ is_special: true })
+      .eq("id", visitId);
+    if (!flagErr) {
+      console.log(`Baro: flagged as special (${rows.length} items)`);
+    }
   }
 }
 

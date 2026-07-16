@@ -1,11 +1,15 @@
 "use client";
 
-import { useState } from "react";
+import { useState, useMemo } from "react";
 import Link from "next/link";
 import type { RankedItem } from "@/lib/data";
 
 export default function RankingTable({ items }: { items: RankedItem[] }) {
   const [expanded, setExpanded] = useState<Set<string>>(new Set());
+  const [showAll, setShowAll] = useState(false);
+  const [search, setSearch] = useState("");
+  const [hideSets, setHideSets] = useState(true);
+  const [minVelocity, setMinVelocity] = useState(5);
 
   function toggle(id: string) {
     setExpanded((prev) => {
@@ -16,41 +20,101 @@ export default function RankingTable({ items }: { items: RankedItem[] }) {
     });
   }
 
+  const filtered = useMemo(() => {
+    let result = items;
+    if (hideSets) {
+      result = result.filter((i) => !i.url_name.endsWith("_set"));
+    }
+    if (minVelocity > 0) {
+      result = result.filter((i) => i.velocity >= minVelocity);
+    }
+    if (search) {
+      const q = search.toLowerCase();
+      result = result.filter((i) => i.item_name.toLowerCase().includes(q));
+    }
+    if (!showAll && !search) {
+      result = result.slice(0, 50);
+    }
+    return result;
+  }, [items, hideSets, minVelocity, search, showAll]);
+
   return (
-    <div className="overflow-x-auto">
-      <table className="w-full text-sm border-collapse">
-        <thead>
-          <tr className="border-b border-zinc-700 text-zinc-400 text-left">
-            <th className="py-2 px-3 font-medium">#</th>
-            <th className="py-2 px-3 font-medium">Item</th>
-            <th className="py-2 px-3 font-medium text-right">Ducats</th>
-            <th className="py-2 px-3 font-medium text-right">Median</th>
-            <th className="py-2 px-3 font-medium text-right">PpD</th>
-            <th className="py-2 px-3 font-medium text-right">PpD@6</th>
-            <th className="py-2 px-3 font-medium text-right">Velocity</th>
-            <th className="py-2 px-3 font-medium text-right">Score</th>
-            <th className="py-2 px-3 font-medium text-center">Depth</th>
-          </tr>
-        </thead>
-        <tbody>
-          {items.map((item, i) => (
-            <ItemRow
-              key={item.id}
-              item={item}
-              rank={i + 1}
-              isExpanded={expanded.has(item.id)}
-              onToggle={() => toggle(item.id)}
-            />
-          ))}
-          {items.length === 0 && (
-            <tr>
-              <td colSpan={9} className="py-8 text-center text-zinc-500">
-                No data available. Run a sweep first.
-              </td>
+    <div>
+      <div className="flex flex-wrap items-center gap-3 mb-4">
+        <input
+          type="text"
+          value={search}
+          onChange={(e) => setSearch(e.target.value)}
+          placeholder="Search items..."
+          className="px-3 py-1.5 rounded bg-zinc-900 border border-zinc-700 text-sm text-zinc-200 placeholder-zinc-600 focus:outline-none focus:border-zinc-500 w-56"
+        />
+        <label className="flex items-center gap-1.5 text-sm text-zinc-400 cursor-pointer">
+          <input
+            type="checkbox"
+            checked={hideSets}
+            onChange={(e) => setHideSets(e.target.checked)}
+            className="accent-emerald-500"
+          />
+          Hide sets
+        </label>
+        <label className="flex items-center gap-1.5 text-sm text-zinc-400">
+          Min vel.
+          <input
+            type="number"
+            value={minVelocity}
+            onChange={(e) => setMinVelocity(Number(e.target.value) || 0)}
+            min={0}
+            className="w-16 px-2 py-1 rounded bg-zinc-900 border border-zinc-700 text-sm text-zinc-200 focus:outline-none focus:border-zinc-500"
+          />
+          /d
+        </label>
+        {!search && (
+          <button
+            onClick={() => setShowAll(!showAll)}
+            className="px-3 py-1.5 rounded bg-zinc-800 border border-zinc-700 text-sm text-zinc-300 hover:bg-zinc-700 transition-colors"
+          >
+            {showAll ? "Top 50" : `Show all (${items.filter((i) => (!hideSets || !i.url_name.endsWith("_set")) && i.velocity >= minVelocity).length})`}
+          </button>
+        )}
+      </div>
+
+      <div className="overflow-x-auto">
+        <table className="w-full text-sm border-collapse">
+          <thead>
+            <tr className="border-b border-zinc-700 text-zinc-400 text-left">
+              <th className="py-2 px-3 font-medium">#</th>
+              <th className="py-2 px-3 font-medium">Item</th>
+              <th className="py-2 px-3 font-medium text-right">Ducats</th>
+              <th className="py-2 px-3 font-medium text-right">Median</th>
+              <th className="py-2 px-3 font-medium text-right">PpD</th>
+              <th className="py-2 px-3 font-medium text-right">PpD@6</th>
+              <th className="py-2 px-3 font-medium text-right">Velocity</th>
+              <th className="py-2 px-3 font-medium text-right">Score</th>
+              <th className="py-2 px-3 font-medium text-center">Depth</th>
             </tr>
-          )}
-        </tbody>
-      </table>
+          </thead>
+          <tbody>
+            {filtered.map((item, i) => (
+              <ItemRow
+                key={item.id}
+                item={item}
+                rank={i + 1}
+                isExpanded={expanded.has(item.id)}
+                onToggle={() => toggle(item.id)}
+              />
+            ))}
+            {filtered.length === 0 && (
+              <tr>
+                <td colSpan={9} className="py-8 text-center text-zinc-500">
+                  {items.length === 0
+                    ? "No data available. Run a sweep first."
+                    : "No items match your filters."}
+                </td>
+              </tr>
+            )}
+          </tbody>
+        </table>
+      </div>
     </div>
   );
 }
@@ -66,6 +130,9 @@ function ItemRow({
   isExpanded: boolean;
   onToggle: () => void;
 }) {
+  const isOutlier =
+    item.ppd_at_n !== null && item.ppd > 0 && item.ppd_at_n > item.ppd * 3;
+
   return (
     <>
       <tr
@@ -87,13 +154,23 @@ function ItemRow({
         </td>
         <td className="py-2 px-3 text-right text-amber-400">{item.ducats}</td>
         <td className="py-2 px-3 text-right">{item.median}p</td>
-        <td className="py-2 px-3 text-right">{item.ppd.toFixed(3)}</td>
+        <td className="py-2 px-3 text-right">{item.ppd.toFixed(1)}</td>
         <td className="py-2 px-3 text-right font-semibold text-emerald-400">
-          {item.ppd_at_n !== null ? item.ppd_at_n.toFixed(3) : "—"}
+          {item.ppd_at_n !== null ? item.ppd_at_n.toFixed(1) : "—"}
+          {isOutlier && (
+            <span
+              className="ml-1 text-yellow-500 cursor-help"
+              title="price from unusually cheap listings — verify in-game"
+            >
+              ⚠
+            </span>
+          )}
         </td>
-        <td className="py-2 px-3 text-right">{item.velocity.toFixed(1)}/d</td>
+        <td className="py-2 px-3 text-right">
+          {Math.round(item.velocity)}/d
+        </td>
         <td className="py-2 px-3 text-right font-bold text-cyan-400">
-          {item.score.toFixed(3)}
+          {item.score.toFixed(1)}
         </td>
         <td className="py-2 px-3 text-center">
           {item.shallow ? (
