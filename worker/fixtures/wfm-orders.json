@@ -1,0 +1,23 @@
+{
+  "data": [
+    {
+      "type": "sell",
+      "user": { "status": "ingame", "ingameName": "TestPlayer1" },
+      "platinum": 3,
+      "quantity": 2,
+      "modRank": null
+    },
+    {
+      "type": "sell",
+      "user": { "status": "online", "ingameName": "TestPlayer2" },
+      "platinum": 5,
+      "quantity": 1
+    },
+    {
+      "type": "buy",
+      "user": { "status": "ingame", "ingameName": "TestPlayer3" },
+      "platinum": 2,
+      "quantity": 3
+    }
+  ]
+}

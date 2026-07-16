@@ -1,15 +1,21 @@
 import { getSupabase } from "./supabase";
+import {
+  computePpdAtN,
+  computeVelocity,
+  computeJunkRateFromRanked,
+  computeBaroRoi,
+  isSpecialVisit,
+  VELOCITY_DAYS,
+  VELOCITY_LIQUID,
+  PPD_N,
+} from "./metrics";
 
-const VELOCITY_DAYS = 14;
-const VELOCITY_LIQUID = 15;
-const PPD_N = 6;
-const JUNK_RATE_FALLBACK = 0.10;
 const RESALE_WINDOW_DAYS = 30;
 
 // PostgREST silently caps every query at 1000 rows; queries that can exceed
 // that must paginate. The page factory MUST apply a deterministic order.
 const PAGE_SIZE = 1000;
-async function fetchAll<T>(
+export async function fetchAll<T>(
   page: (from: number, to: number) => PromiseLike<{ data: T[] | null }>,
 ): Promise<T[]> {
   const all: T[] = [];
@@ -216,28 +222,10 @@ export async function getRankedItems(): Promise<RankedItem[]> {
     // Rows are already limited to the trailing window; days with no trades
     // have no row, so divide by the full window for a true per-day rate.
     const volumes = volumeByItem.get(item.id) ?? [];
-    const velocity = volumes.reduce((a, b) => a + b, 0) / VELOCITY_DAYS;
+    const velocity = computeVelocity(volumes, VELOCITY_DAYS);
 
     const orders = ordersByItem.get(item.id) ?? [];
-    let ppd_at_n: number | null = null;
-    let shallow = false;
-
-    if (orders.length > 0) {
-      let cumQty = 0;
-      let cumCost = 0;
-      for (const o of orders) {
-        const take = Math.min(o.quantity, PPD_N - cumQty);
-        cumCost += o.price * take;
-        cumQty += take;
-        if (cumQty >= PPD_N) break;
-      }
-      if (cumQty >= PPD_N) {
-        ppd_at_n = (ducats * PPD_N) / cumCost;
-      } else {
-        ppd_at_n = cumQty > 0 ? (ducats * cumQty) / cumCost : null;
-        shallow = true;
-      }
-    }
+    const { ppdAtN: ppd_at_n, shallow } = computePpdAtN(orders, ducats, PPD_N);
 
     const effectivePpd = ppd_at_n ?? ppd;
     const score = effectivePpd * Math.min(1, velocity / VELOCITY_LIQUID);
@@ -268,16 +256,7 @@ export async function getRankedItems(): Promise<RankedItem[]> {
 
 export async function computeJunkRate(): Promise<number> {
   const items = await getRankedItems();
-  const withDepth = items.filter((i) => i.ppd_at_n !== null && !i.shallow);
-  const top = withDepth.slice(0, 20);
-  if (top.length === 0) return JUNK_RATE_FALLBACK;
-  const values = top.map((i) => i.ppd_at_n!).sort((a, b) => a - b);
-  const mid = Math.floor(values.length / 2);
-  const median =
-    values.length % 2 === 0
-      ? (values[mid - 1] + values[mid]) / 2
-      : values[mid];
-  return 1 / median;
+  return computeJunkRateFromRanked(items);
 }
 
 export interface BundleSeller {
@@ -372,10 +351,6 @@ export interface BaroVisit {
   relay: string | null;
   is_special: boolean;
   items: BaroVisitItem[];
-}
-
-function isSpecialVisit(relay: string | null, itemCount: number): boolean {
-  return (relay != null && /tennocon/i.test(relay)) || itemCount >= 150;
 }
 
 export interface BaroVisitItem {
@@ -486,7 +461,7 @@ export async function getBaroVisits(): Promise<{ visits: BaroVisit[]; junkRate: 
       const resale_median = vi.item_id ? (resaleMap.get(vi.item_id) ?? null) : null;
       const roi =
         is_primed_mod && resale_median !== null
-          ? resale_median - vi.ducat_cost * junkRate
+          ? computeBaroRoi(resale_median, vi.ducat_cost, junkRate)
           : null;
       return {
         item_name: vi.item_name,

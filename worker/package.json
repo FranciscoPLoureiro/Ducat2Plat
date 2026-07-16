@@ -3,15 +3,18 @@
   "private": true,
   "type": "module",
   "scripts": {
-    "sweep": "tsx sweep.ts"
+    "sweep": "tsx sweep.ts",
+    "test": "vitest run"
   },
   "dependencies": {
     "@supabase/supabase-js": "^2.49.0",
-    "dotenv": "^16.4.0"
+    "dotenv": "^16.4.0",
+    "zod": "^4.4.3"
   },
   "devDependencies": {
     "@types/node": "^26.1.1",
     "tsx": "^4.19.0",
-    "typescript": "^5.7.0"
+    "typescript": "^5.7.0",
+    "vitest": "^4.1.10"
   }
 }
