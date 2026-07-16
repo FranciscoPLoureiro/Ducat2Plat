@@ -1,0 +1,25 @@
+{
+  "payload": {
+    "statistics_closed": {
+      "90days": [
+        {
+          "datetime": "2025-07-15T00:00:00.000+00:00",
+          "volume": 42,
+          "median": 3.0,
+          "avg_price": 3.2,
+          "min_price": 1.0,
+          "max_price": 10.0
+        },
+        {
+          "datetime": "2025-07-14T00:00:00.000+00:00",
+          "mod_rank": 0,
+          "volume": 15,
+          "median": 5.0,
+          "avg_price": 5.5,
+          "min_price": 2.0,
+          "max_price": 12.0
+        }
+      ]
+    }
+  }
+}

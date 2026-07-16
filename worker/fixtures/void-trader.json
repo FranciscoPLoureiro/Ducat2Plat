@@ -1,0 +1,18 @@
+{
+  "activation": "2025-07-11T18:00:00.000Z",
+  "expiry": "2025-07-13T18:00:00.000Z",
+  "location": "Larunda Relay (Mercury)",
+  "active": true,
+  "inventory": [
+    {
+      "item": "Primed Continuity",
+      "ducats": 350,
+      "credits": 110000
+    },
+    {
+      "item": "Sands of Inaros",
+      "ducats": 100,
+      "credits": 25000
+    }
+  ]
+}

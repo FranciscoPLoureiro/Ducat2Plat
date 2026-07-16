@@ -1,5 +1,7 @@
 # Ducat2Plat
 
+![CI](https://github.com/FranciscoPLoureiro/Ducat2Plat/actions/workflows/ci.yml/badge.svg)
+
 Plat-per-Ducat arbitrage dashboard for Warframe. Ranks Prime junk by actionable
 PpD@6, tracks Baro Ki'Teer item ROI, and surfaces seller bundles for
 trade-slot-efficient buying.

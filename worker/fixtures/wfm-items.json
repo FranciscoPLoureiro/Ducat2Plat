@@ -1,0 +1,27 @@
+{
+  "data": [
+    {
+      "id": "54a74454e779892d5e51476a",
+      "slug": "ember_prime_neuroptics",
+      "i18n": { "en": { "name": "Ember Prime Neuroptics" } },
+      "tags": ["prime", "component"],
+      "ducats": 15,
+      "maxRank": null
+    },
+    {
+      "id": "5cfe1e3c86377d0035fe4c23",
+      "slug": "primed_continuity",
+      "i18n": { "en": { "name": "Primed Continuity" } },
+      "tags": ["primed", "mod"],
+      "ducats": null,
+      "maxRank": 10
+    },
+    {
+      "id": "60a3b1aee779892d5e51ab12",
+      "slug": "mesa_prime_systems",
+      "i18n": { "en": { "name": "Mesa Prime Systems" } },
+      "tags": ["prime", "component"],
+      "ducats": 45
+    }
+  ]
+}

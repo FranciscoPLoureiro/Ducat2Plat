@@ -2,6 +2,12 @@ import { config } from "dotenv";
 config({ path: ".env.local" });
 
 import { createClient } from "@supabase/supabase-js";
+import {
+  WfmItemsResponseSchema,
+  WfmStatisticsResponseSchema,
+  WfmOrdersResponseSchema,
+  VoidTraderResponseSchema,
+} from "./wfm-schemas";
 
 const SUPABASE_URL = process.env.SUPABASE_URL;
 const SUPABASE_KEY = process.env.SUPABASE_SERVICE_ROLE_KEY;
@@ -21,7 +27,7 @@ function sleep(ms: number) {
   return new Promise<void>((r) => setTimeout(r, ms));
 }
 
-async function wfmFetch(url: string): Promise<any> {
+async function wfmFetch(url: string): Promise<unknown> {
   const gap = RATE_MS - (Date.now() - lastReq);
   if (gap > 0) await sleep(gap);
   lastReq = Date.now();
@@ -62,7 +68,7 @@ async function openSweep(): Promise<number> {
     .select("id")
     .single();
   if (error || !data) throw new Error(`Open sweep: ${error?.message}`);
-  return data.id;
+  return (data as { id: number }).id;
 }
 
 // Step 2 — v2 /items includes ducats/tags/maxRank inline, no detail calls needed
@@ -71,8 +77,15 @@ async function syncCatalog(): Promise<{
   ok: number;
   failed: number;
 }> {
-  const json = await wfmFetch(`${WFM_V2}/items`);
-  const apiItems: any[] = json.data;
+  const rawJson = await wfmFetch(`${WFM_V2}/items`);
+  const parsed = WfmItemsResponseSchema.safeParse(rawJson);
+  if (!parsed.success) {
+    console.warn(
+      `Items API schema validation failed: ${parsed.error.issues[0]?.message}`,
+    );
+    return { total: 0, ok: 0, failed: 0 };
+  }
+  const apiItems = parsed.data.data;
   console.log(`API: ${apiItems.length} items`);
 
   const known = new Set<string>();
@@ -83,13 +96,14 @@ async function syncCatalog(): Promise<{
       .from("prime_items")
       .select("url_name")
       .range(from, from + PAGE - 1);
-    if (!data?.length) break;
-    for (const r of data) known.add(r.url_name);
-    if (data.length < PAGE) break;
+    const rows = (data ?? []) as { url_name: string }[];
+    if (!rows.length) break;
+    for (const r of rows) known.add(r.url_name);
+    if (rows.length < PAGE) break;
     from += PAGE;
   }
 
-  const fresh = apiItems.filter((i: any) => !known.has(i.slug));
+  const fresh = apiItems.filter((i) => !known.has(i.slug));
   console.log(`${fresh.length} new items to insert`);
 
   let ok = 0;
@@ -99,9 +113,9 @@ async function syncCatalog(): Promise<{
   const BATCH = 100;
   for (let i = 0; i < fresh.length; i += BATCH) {
     const batch = fresh.slice(i, i + BATCH);
-    const mapped = batch.map((item: any) => {
+    const mapped = batch.map((item) => {
       const name: string = item.i18n?.en?.name ?? item.slug;
-      const tags: string[] = item.tags ?? [];
+      const tags: string[] = item.tags;
       const isPrimed = tags.includes("primed") || name.startsWith("Primed ");
       return {
         wfm_id: item.id,
@@ -128,8 +142,8 @@ async function syncCatalog(): Promise<{
 
   // Update last_seen_at for existing items
   const existing = apiItems
-    .filter((i: any) => known.has(i.slug))
-    .map((i: any) => i.slug);
+    .filter((i) => known.has(i.slug))
+    .map((i) => i.slug);
   const CHUNK = 500;
   for (let i = 0; i < existing.length; i += CHUNK) {
     await db
@@ -145,13 +159,14 @@ async function syncCatalog(): Promise<{
 async function fetchStats(
   sweepId: number,
 ): Promise<{ ok: number; failed: number }> {
-  const { data: items, error } = await db
+  const { data, error } = await db
     .from("prime_items")
     .select("id, url_name")
     .or("ducats.not.is.null,is_primed_mod.eq.true");
 
   if (error) throw new Error(`Query items: ${error.message}`);
-  if (!items?.length) {
+  const items = (data ?? []) as { id: string; url_name: string }[];
+  if (!items.length) {
     console.log("No trackable items");
     return { ok: 0, failed: 0 };
   }
@@ -162,17 +177,24 @@ async function fetchStats(
 
   for (const item of items) {
     try {
-      const json = await wfmFetch(
+      const rawJson = await wfmFetch(
         `${WFM_V1}/items/${item.url_name}/statistics`,
       );
-      const closed: any[] =
-        json.payload?.statistics_closed?.["90days"] ?? [];
+      const parsed = WfmStatisticsResponseSchema.safeParse(rawJson);
+      if (!parsed.success) {
+        console.warn(
+          `  ${item.url_name}: schema validation: ${parsed.error.issues[0]?.message}`,
+        );
+        failed++;
+        continue;
+      }
+      const closed = parsed.data.payload.statistics_closed["90days"];
       if (!closed.length) {
         ok++;
         continue;
       }
 
-      const rows = closed.map((r: any) => ({
+      const rows = closed.map((r) => ({
         item_id: item.id,
         stat_date: r.datetime.slice(0, 10),
         mod_rank: r.mod_rank ?? -1,
@@ -195,8 +217,9 @@ async function fetchStats(
         }
       }
       ok++;
-    } catch (err: any) {
-      console.warn(`  ${item.url_name}: stats: ${err.message}`);
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err);
+      console.warn(`  ${item.url_name}: stats: ${msg}`);
       failed++;
     }
   }
@@ -208,17 +231,19 @@ async function fetchStats(
 async function fetchOrderDepth(
   sweepId: number,
 ): Promise<{ ok: number; failed: number }> {
-  const { data: rawItems, error: qErr } = await db
+  const { data: rawItemsData, error: qErr } = await db
     .from("prime_items")
     .select("id, url_name, ducats")
     .not("ducats", "is", null);
-  if (qErr || !rawItems?.length) {
+  if (qErr || !rawItemsData?.length) {
     console.log("No candidates for order depth");
     return { ok: 0, failed: 0 };
   }
+  const rawItems = rawItemsData as { id: string; url_name: string; ducats: number }[];
 
-  const itemIds = rawItems.map((i: any) => i.id);
-  const ppds: { id: string; url_name: string; ducats: number; ppd: number }[] = [];
+  const itemIds = rawItems.map((i) => i.id);
+  const ppds: { id: string; url_name: string; ducats: number; ppd: number }[] =
+    [];
 
   const CHUNK = 200;
   for (let i = 0; i < itemIds.length; i += CHUNK) {
@@ -231,11 +256,12 @@ async function fetchOrderDepth(
       .order("stat_date", { ascending: false });
 
     if (statsRows) {
+      const typed = statsRows as { item_id: string; median: number }[];
       const seen = new Set<string>();
-      for (const row of statsRows) {
+      for (const row of typed) {
         if (seen.has(row.item_id)) continue;
         seen.add(row.item_id);
-        const item = rawItems.find((r: any) => r.id === row.item_id);
+        const item = rawItems.find((r) => r.id === row.item_id);
         if (item && row.median && row.median > 0) {
           ppds.push({
             id: item.id,
@@ -249,34 +275,38 @@ async function fetchOrderDepth(
   }
 
   ppds.sort((a, b) => b.ppd - a.ppd);
-  const items = ppds.slice(0, 60);
+  const candidates = ppds.slice(0, 60);
 
-  console.log(`Fetching orders for ${items.length} top candidates`);
+  console.log(`Fetching orders for ${candidates.length} top candidates`);
   let ok = 0;
   let failed = 0;
 
-  for (const item of items) {
+  for (const item of candidates) {
     try {
-      const json = await wfmFetch(
+      const rawJson = await wfmFetch(
         `${WFM_V2}/orders/item/${item.url_name}`,
       );
-      const orders: any[] = json.data ?? [];
+      const parsed = WfmOrdersResponseSchema.safeParse(rawJson);
+      if (!parsed.success) {
+        console.warn(
+          `  ${item.url_name}: orders schema validation: ${parsed.error.issues[0]?.message}`,
+        );
+        failed++;
+        continue;
+      }
+      const orders = parsed.data.data;
 
-      // Keep only sell orders from ingame sellers
       const ingameSells = orders
-        .filter(
-          (o: any) =>
-            o.type === "sell" && o.user?.status === "ingame",
-        )
-        .sort((a: any, b: any) => a.platinum - b.platinum)
+        .filter((o) => o.type === "sell" && o.user.status === "ingame")
+        .sort((a, b) => a.platinum - b.platinum)
         .slice(0, 20);
 
       if (ingameSells.length) {
-        const rows = ingameSells.map((o: any) => ({
+        const rows = ingameSells.map((o) => ({
           sweep_id: sweepId,
           item_id: item.id,
           price: o.platinum,
-          quantity: o.quantity ?? 1,
+          quantity: o.quantity,
           mod_rank: o.modRank ?? null,
           seller_name: o.user.ingameName,
           seller_status: "ingame",
@@ -292,8 +322,9 @@ async function fetchOrderDepth(
         }
       }
       ok++;
-    } catch (err: any) {
-      console.warn(`  ${item.url_name}: orders: ${err.message}`);
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err);
+      console.warn(`  ${item.url_name}: orders: ${msg}`);
       failed++;
     }
   }
@@ -304,7 +335,7 @@ async function fetchOrderDepth(
 // Step 5 — Baro Ki'Teer
 async function fetchBaro(): Promise<void> {
   const BARO_URL = "https://api.warframestat.us/pc/voidTrader";
-  let data: any;
+  let rawBaroData: unknown;
   try {
     const res = await fetch(BARO_URL, {
       headers: { Accept: "application/json" },
@@ -313,27 +344,31 @@ async function fetchBaro(): Promise<void> {
       console.warn(`Baro API returned ${res.status}`);
       return;
     }
-    data = await res.json();
-  } catch (err: any) {
-    console.warn(`Baro fetch failed: ${err.message}`);
+    rawBaroData = await res.json();
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : String(err);
+    console.warn(`Baro fetch failed: ${msg}`);
     return;
   }
 
-  if (!data.activation || !data.expiry) {
-    console.log("Baro: no activation/expiry data");
+  const baroParsed = VoidTraderResponseSchema.safeParse(rawBaroData);
+  if (!baroParsed.success) {
+    console.warn(
+      `Baro API schema validation failed: ${baroParsed.error.issues[0]?.message}`,
+    );
     return;
   }
+  const baro = baroParsed.data;
 
-  const arrival = data.activation;
-  const departure = data.expiry;
-  const relay = data.location ?? null;
+  const arrival = baro.activation;
+  const departure = baro.expiry;
+  const relay = baro.location ?? null;
   const now = Date.now();
   const isActive =
-    data.active === true ||
+    baro.active === true ||
     (new Date(arrival).getTime() <= now && now < new Date(departure).getTime());
 
-  const isSpecial =
-    (relay && /tennocon/i.test(relay)) || false;
+  const isSpecial = relay !== null && /tennocon/i.test(relay);
 
   // Upsert visit keyed on arrival
   const visitPayload: Record<string, unknown> = { arrival, departure, relay };
@@ -350,11 +385,11 @@ async function fetchBaro(): Promise<void> {
     return;
   }
 
-  const visitId = visitRow.id;
+  const visitId = (visitRow as { id: number }).id;
   console.log(`Baro visit #${visitId} (active=${isActive}, relay=${relay})`);
 
   // If active and has inventory, upsert items
-  const inventory: any[] = data.inventory ?? [];
+  const inventory = baro.inventory;
   if (!isActive || !inventory.length) {
     console.log(`Baro: ${isActive ? "active but no inventory" : "not active"}`);
     return;
@@ -364,17 +399,18 @@ async function fetchBaro(): Promise<void> {
 
   // Get all prime_items for case-insensitive matching
   const allItems: { id: string; item_name: string }[] = [];
-  let from = 0;
+  let dbFrom = 0;
   const PAGE = 1000;
   while (true) {
     const { data: page } = await db
       .from("prime_items")
       .select("id, item_name")
-      .range(from, from + PAGE - 1);
-    if (!page?.length) break;
-    for (const r of page) allItems.push(r);
-    if (page.length < PAGE) break;
-    from += PAGE;
+      .range(dbFrom, dbFrom + PAGE - 1);
+    const rows = (page ?? []) as { id: string; item_name: string }[];
+    if (!rows.length) break;
+    for (const r of rows) allItems.push(r);
+    if (rows.length < PAGE) break;
+    dbFrom += PAGE;
   }
 
   const nameLookup = new Map<string, string>();
@@ -382,8 +418,8 @@ async function fetchBaro(): Promise<void> {
     nameLookup.set(item.item_name.toLowerCase(), item.id);
   }
 
-  const rows = inventory.map((inv: any) => {
-    const matchedId = nameLookup.get((inv.item ?? "").toLowerCase()) ?? null;
+  const rows = inventory.map((inv) => {
+    const matchedId = nameLookup.get(inv.item.toLowerCase()) ?? null;
     return {
       visit_id: visitId,
       item_id: matchedId,
@@ -414,12 +450,78 @@ async function fetchBaro(): Promise<void> {
   }
 }
 
+// Data-quality gate (M8.4)
+const VALID_DUCATS = new Set([15, 25, 45, 65, 100]);
+
+async function checkDataQuality(sweepId: number): Promise<string[]> {
+  const violations: string[] = [];
+
+  // 1. Ducats of junk items ∈ {15,25,45,65,100}
+  const { data: junkData } = await db
+    .from("prime_items")
+    .select("url_name, ducats")
+    .not("ducats", "is", null);
+  const junkItems = (junkData ?? []) as { url_name: string; ducats: number }[];
+  const badDucats = junkItems.filter((i) => !VALID_DUCATS.has(i.ducats));
+  if (badDucats.length > 0) {
+    const examples = badDucats
+      .slice(0, 5)
+      .map((i) => `${i.url_name}=${i.ducats}`)
+      .join(", ");
+    violations.push(
+      `${badDucats.length} items with invalid ducats: ${examples}`,
+    );
+  }
+
+  // 2. Medians > 0
+  const { count: badMedians } = await db
+    .from("trade_stats")
+    .select("*", { count: "exact", head: true })
+    .eq("sweep_id", sweepId)
+    .lte("median", 0);
+  if (badMedians && badMedians > 0) {
+    violations.push(`${badMedians} trade_stats rows with median <= 0`);
+  }
+
+  // 3. Stats row count within 0.5×–2× of the previous sweep
+  const { count: currentStatsRows } = await db
+    .from("trade_stats")
+    .select("*", { count: "exact", head: true })
+    .eq("sweep_id", sweepId);
+
+  const { data: prevSweepData } = await db
+    .from("sweeps")
+    .select("notes")
+    .not("completed_at", "is", null)
+    .order("id", { ascending: false })
+    .limit(1)
+    .single();
+
+  if (prevSweepData?.notes) {
+    const match = String(prevSweepData.notes).match(/stats_rows=(\d+)/);
+    if (match && currentStatsRows != null) {
+      const prevRows = parseInt(match[1]);
+      if (prevRows > 0) {
+        const ratio = currentStatsRows / prevRows;
+        if (ratio < 0.5 || ratio > 2) {
+          violations.push(
+            `Stats row count ${currentStatsRows} is ${ratio.toFixed(2)}× previous (${prevRows})`,
+          );
+        }
+      }
+    }
+  }
+
+  return violations;
+}
+
 // Step 6 — Close sweep + heartbeat
 async function closeSweep(
   sweepId: number,
   total: number,
   ok: number,
   failed: number,
+  notes?: string,
 ) {
   await db
     .from("sweeps")
@@ -428,6 +530,7 @@ async function closeSweep(
       items_total: total,
       items_ok: ok,
       items_failed: failed,
+      notes: notes ?? null,
     })
     .eq("id", sweepId);
 
@@ -488,16 +591,34 @@ async function main() {
   const processed = totalOk + totalFailed;
   const rate = processed > 0 ? totalOk / processed : 1;
 
+  // Data-quality gate
+  console.log("--- Data-quality gate ---");
+  const violations = await checkDataQuality(sweepId);
+
+  const { count: statsRowCount } = await db
+    .from("trade_stats")
+    .select("*", { count: "exact", head: true })
+    .eq("sweep_id", sweepId);
+  const statsRowsNote = `stats_rows=${statsRowCount ?? 0}`;
+
+  let notes = statsRowsNote;
+  if (violations.length > 0) {
+    for (const v of violations) console.warn(`  VIOLATION: ${v}`);
+    notes = violations.join("; ") + " | " + statsRowsNote;
+  } else {
+    console.log("  All checks passed");
+  }
+
   if (rate >= 0.9) {
-    await closeSweep(sweepId, catalog.total, totalOk, totalFailed);
+    await closeSweep(sweepId, catalog.total, totalOk, totalFailed, notes);
     console.log(
       `Sweep #${sweepId} completed (${totalOk} ok, ${totalFailed} failed, ${(rate * 100).toFixed(1)}%)`,
     );
 
     const failRate = processed > 0 ? totalFailed / processed : 0;
-    if (failRate > 0.1) {
+    if (violations.length > 0 || failRate > 0.1) {
       console.warn(
-        `Sweep #${sweepId} degraded: ${(failRate * 100).toFixed(1)}% item failures exceed 10% threshold`,
+        `Sweep #${sweepId} degraded: ${violations.length} quality violations, ${(failRate * 100).toFixed(1)}% item failures`,
       );
       process.exit(2);
     }
