@@ -42,6 +42,21 @@ jobs:
           fi
           exit $code
 
+      - name: Revalidate pages
+        if: success()
+        env:
+          REVALIDATE_URL: ${{ secrets.REVALIDATE_URL }}
+          REVALIDATE_TOKEN: ${{ secrets.REVALIDATE_TOKEN }}
+        run: |
+          if [ -n "$REVALIDATE_URL" ] && [ -n "$REVALIDATE_TOKEN" ]; then
+            curl -sS -f -X POST "$REVALIDATE_URL" \
+              -H "x-revalidate-token: $REVALIDATE_TOKEN" \
+              -H "Content-Type: application/json" \
+              || echo "::warning::Revalidation request failed (non-fatal)"
+          else
+            echo "::notice::REVALIDATE_URL or REVALIDATE_TOKEN not set — skipping revalidation"
+          fi
+
       - name: Alert degraded sweep
         if: steps.sweep.outputs.exit_code == '2'
         env:

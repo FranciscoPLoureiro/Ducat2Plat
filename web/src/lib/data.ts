@@ -1,14 +1,8 @@
 import { getSupabase } from "./supabase";
 import {
-  computePpdAtN,
-  computeVelocity,
-  computeJunkRateFromRanked,
   computeBaroRoi,
   isSpecialVisit,
-  VELOCITY_DAYS,
-  VELOCITY_LIQUID,
-  PPD_N,
-} from "./metrics";
+} from "@shared/metrics";
 
 const RESALE_WINDOW_DAYS = 30;
 
@@ -53,32 +47,12 @@ export interface Order {
   seller_name: string;
 }
 
-export interface StalenessInfo {
-  stale: boolean;
-  hoursAgo: number | null;
-}
-
 export interface BaroCountdown {
   daysUntil: number | null;
   active: boolean;
   relay: string | null;
   arrival: string | null;
   departure: string | null;
-}
-
-export async function getStaleness(): Promise<StalenessInfo> {
-  const db = getSupabase();
-  const { data } = await db
-    .from("heartbeat")
-    .select("updated_at")
-    .eq("id", 1)
-    .single();
-
-  if (!data) return { stale: true, hoursAgo: null };
-
-  const hoursAgo =
-    (Date.now() - new Date(data.updated_at).getTime()) / (1000 * 60 * 60);
-  return { stale: hoursAgo > 36, hoursAgo: Math.round(hoursAgo) };
 }
 
 export async function getLatestSweepId(): Promise<number | null> {
@@ -136,127 +110,74 @@ export async function getRankedItems(): Promise<RankedItem[]> {
   const sweepId = await getLatestSweepId();
   if (!sweepId) return [];
 
-  const { data: items } = await db
-    .from("prime_items")
-    .select("id, url_name, item_name, ducats")
-    .not("ducats", "is", null);
-
-  if (!items?.length) return [];
-
-  const itemIds = items.map((i) => i.id);
-
-  const velocityCutoff = daysAgoDate(VELOCITY_DAYS);
-  const allStats: Array<{
+  const rows = await fetchAll<{
     item_id: string;
-    stat_date: string;
-    median: number;
-    volume: number;
-    mod_rank: number;
-  }> = [];
+    rank: number;
+    ppd: number;
+    ppd_at_n: number | null;
+    velocity: number;
+    score: number;
+    shallow: boolean;
+    orders_json: Order[] | null;
+  }>((from, to) =>
+    db
+      .from("rankings")
+      .select("item_id, rank, ppd, ppd_at_n, velocity, score, shallow, orders_json")
+      .eq("sweep_id", sweepId)
+      .order("rank", { ascending: true })
+      .range(from, to),
+  );
+
+  if (!rows.length) return [];
+
+  const itemIds = rows.map((r) => r.item_id);
+  const itemMap = new Map<string, { url_name: string; item_name: string; ducats: number }>();
   const CHUNK = 200;
   for (let i = 0; i < itemIds.length; i += CHUNK) {
     const chunk = itemIds.slice(i, i + CHUNK);
-    const statsRows = await fetchAll<(typeof allStats)[number]>((from, to) =>
-      db
-        .from("trade_stats")
-        .select("item_id, stat_date, median, volume, mod_rank")
-        .in("item_id", chunk)
-        .eq("mod_rank", -1)
-        .gte("stat_date", velocityCutoff)
-        .order("stat_date", { ascending: false })
-        .order("item_id", { ascending: true })
-        .range(from, to),
-    );
-    allStats.push(...statsRows);
-  }
-
-  const latestMedian = new Map<string, number>();
-  const volumeByItem = new Map<string, number[]>();
-
-  for (const row of allStats) {
-    if (!latestMedian.has(row.item_id) && row.median > 0) {
-      latestMedian.set(row.item_id, Number(row.median));
+    const { data: items } = await db
+      .from("prime_items")
+      .select("id, url_name, item_name, ducats")
+      .in("id", chunk);
+    if (items) {
+      for (const it of items) {
+        itemMap.set(it.id, { url_name: it.url_name, item_name: it.item_name, ducats: it.ducats as number });
+      }
     }
-    if (!volumeByItem.has(row.item_id)) volumeByItem.set(row.item_id, []);
-    volumeByItem.get(row.item_id)!.push(Number(row.volume ?? 0));
   }
 
-  const allOrders: Array<{
-    item_id: string;
-    price: number;
-    quantity: number;
-    mod_rank: number | null;
-    seller_name: string;
-  }> = [];
-  for (let i = 0; i < itemIds.length; i += CHUNK) {
-    const chunk = itemIds.slice(i, i + CHUNK);
-    const orderRows = await fetchAll<(typeof allOrders)[number] & { id: number }>(
-      (from, to) =>
-        db
-          .from("order_snapshots")
-          .select("id, item_id, price, quantity, mod_rank, seller_name")
-          .eq("sweep_id", sweepId)
-          .in("item_id", chunk)
-          .order("price", { ascending: true })
-          .order("id", { ascending: true })
-          .range(from, to),
-    );
-    allOrders.push(...orderRows);
-  }
-
-  const ordersByItem = new Map<string, typeof allOrders>();
-  for (const o of allOrders) {
-    if (!ordersByItem.has(o.item_id)) ordersByItem.set(o.item_id, []);
-    ordersByItem.get(o.item_id)!.push(o);
-  }
-
-  const results: RankedItem[] = [];
-
-  for (const item of items) {
-    const median = latestMedian.get(item.id);
-    if (!median || median <= 0) continue;
-
-    const ducats = item.ducats as number;
-    const ppd = ducats / median;
-
-    // Rows are already limited to the trailing window; days with no trades
-    // have no row, so divide by the full window for a true per-day rate.
-    const volumes = volumeByItem.get(item.id) ?? [];
-    const velocity = computeVelocity(volumes, VELOCITY_DAYS);
-
-    const orders = ordersByItem.get(item.id) ?? [];
-    const { ppdAtN: ppd_at_n, shallow } = computePpdAtN(orders, ducats, PPD_N);
-
-    const effectivePpd = ppd_at_n ?? ppd;
-    const score = effectivePpd * Math.min(1, velocity / VELOCITY_LIQUID);
-
-    results.push({
-      id: item.id,
-      url_name: item.url_name,
-      item_name: item.item_name,
-      ducats,
-      median: Math.round(median * 100) / 100,
-      ppd: Math.round(ppd * 1000) / 1000,
-      ppd_at_n: ppd_at_n !== null ? Math.round(ppd_at_n * 1000) / 1000 : null,
-      velocity: Math.round(velocity * 10) / 10,
-      score: Math.round(score * 1000) / 1000,
-      shallow,
-      orders: orders.map((o) => ({
-        price: o.price,
-        quantity: o.quantity,
-        mod_rank: o.mod_rank,
-        seller_name: o.seller_name,
-      })),
+  return rows
+    .filter((r) => itemMap.has(r.item_id))
+    .map((r) => {
+      const item = itemMap.get(r.item_id)!;
+      return {
+        id: r.item_id,
+        url_name: item.url_name,
+        item_name: item.item_name,
+        ducats: item.ducats,
+        median: Number(r.ppd) > 0 ? Math.round((item.ducats / Number(r.ppd)) * 100) / 100 : 0,
+        ppd: Number(r.ppd),
+        ppd_at_n: r.ppd_at_n !== null ? Number(r.ppd_at_n) : null,
+        velocity: Number(r.velocity),
+        score: Number(r.score),
+        shallow: r.shallow,
+        orders: (r.orders_json ?? []) as Order[],
+      };
     });
-  }
-
-  results.sort((a, b) => b.score - a.score);
-  return results;
 }
 
 export async function computeJunkRate(): Promise<number> {
-  const items = await getRankedItems();
-  return computeJunkRateFromRanked(items);
+  const db = getSupabase();
+  const sweepId = await getLatestSweepId();
+  if (!sweepId) return 0.10;
+
+  const { data } = await db
+    .from("sweeps")
+    .select("junk_rate")
+    .eq("id", sweepId)
+    .single();
+
+  return data?.junk_rate != null ? Number(data.junk_rate) : 0.10;
 }
 
 export interface BundleSeller {

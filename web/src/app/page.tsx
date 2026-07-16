@@ -1,22 +1,18 @@
-import { getStaleness, getBaroCountdown, getRankedItems } from "@/lib/data";
+import { getBaroCountdown, getRankedItems } from "@/lib/data";
 import RankingTable from "./components/ranking-table";
+import StalenessBanner from "./components/staleness-banner";
 
-export const dynamic = "force-dynamic";
+export const revalidate = 3600;
 
 export default async function Home() {
-  const [staleness, baro, items] = await Promise.all([
-    getStaleness(),
+  const [baro, items] = await Promise.all([
     getBaroCountdown(),
     getRankedItems(),
   ]);
 
   return (
     <div className="max-w-7xl mx-auto px-4 py-6">
-      {staleness.stale && (
-        <div className="mb-4 px-4 py-3 rounded bg-yellow-900/60 border border-yellow-700 text-yellow-200 text-sm">
-          Data is {staleness.hoursAgo ?? "??"} hours old — pipeline may be down.
-        </div>
-      )}
+      <StalenessBanner />
 
       <header className="flex items-center justify-between mb-6">
         <h1 className="text-xl font-bold tracking-tight">Junk Ranking</h1>
