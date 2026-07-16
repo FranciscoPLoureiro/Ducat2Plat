@@ -2,7 +2,7 @@ import { getSupabase } from "./supabase";
 import {
   computeBaroRoi,
   isSpecialVisit,
-} from "@shared/metrics";
+} from "./metrics";
 
 const RESALE_WINDOW_DAYS = 30;
 
