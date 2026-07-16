@@ -8,6 +8,14 @@ import {
   WfmOrdersResponseSchema,
   VoidTraderResponseSchema,
 } from "./wfm-schemas";
+import {
+  computePpdAtN,
+  computeVelocity,
+  computeJunkRateFromRanked,
+  VELOCITY_DAYS,
+  VELOCITY_LIQUID,
+  PPD_N,
+} from "../shared/metrics";
 
 const SUPABASE_URL = process.env.SUPABASE_URL;
 const SUPABASE_KEY = process.env.SUPABASE_SERVICE_ROLE_KEY;
@@ -562,6 +570,236 @@ async function pruneOldSnapshots(): Promise<void> {
   }
 }
 
+async function pruneOldRankings(): Promise<void> {
+  const { data: recentSweeps } = await db
+    .from("sweeps")
+    .select("id")
+    .not("completed_at", "is", null)
+    .order("id", { ascending: false })
+    .limit(30);
+
+  if (!recentSweeps?.length) return;
+
+  const keepIds = recentSweeps.map((s) => (s as { id: number }).id);
+  const minKeepId = Math.min(...keepIds);
+
+  const { error, count } = await db
+    .from("rankings")
+    .delete({ count: "exact" })
+    .lt("sweep_id", minKeepId);
+
+  if (error) {
+    console.warn(`Rankings retention prune: ${error.message}`);
+  } else {
+    console.log(`Retention: pruned ${count ?? 0} old rankings rows`);
+  }
+}
+
+async function appendRowCountTelemetry(sweepId: number): Promise<void> {
+  const tables = ["rankings", "trade_stats", "order_snapshots", "prime_items"] as const;
+  const counts: string[] = [];
+
+  for (const table of tables) {
+    const { count } = await db
+      .from(table)
+      .select("*", { count: "exact", head: true });
+    counts.push(`${table}=${count ?? 0}`);
+  }
+
+  const telemetry = counts.join(", ");
+
+  const { data: sweep } = await db
+    .from("sweeps")
+    .select("notes")
+    .eq("id", sweepId)
+    .single();
+
+  const existing = sweep?.notes ? String(sweep.notes) : "";
+  const updated = existing ? `${existing} | ${telemetry}` : telemetry;
+
+  const { error } = await db
+    .from("sweeps")
+    .update({ notes: updated })
+    .eq("id", sweepId);
+
+  if (error) {
+    console.warn(`Telemetry update error: ${error.message}`);
+  } else {
+    console.log(`Telemetry: ${telemetry}`);
+  }
+}
+
+const PAGE_SIZE = 1000;
+async function fetchAllRows<T>(
+  query: (from: number, to: number) => PromiseLike<{ data: T[] | null }>,
+): Promise<T[]> {
+  const all: T[] = [];
+  for (let from = 0; ; from += PAGE_SIZE) {
+    const { data } = await query(from, from + PAGE_SIZE - 1);
+    if (!data?.length) break;
+    all.push(...data);
+    if (data.length < PAGE_SIZE) break;
+  }
+  return all;
+}
+
+function daysAgoDate(days: number): string {
+  return new Date(Date.now() - days * 86_400_000).toISOString().slice(0, 10);
+}
+
+async function computeAndWriteRankings(sweepId: number): Promise<void> {
+  const { data: items } = await db
+    .from("prime_items")
+    .select("id, url_name, item_name, ducats")
+    .not("ducats", "is", null);
+
+  if (!items?.length) {
+    console.log("No items with ducats — skipping rankings");
+    return;
+  }
+
+  const itemIds = items.map((i) => i.id as string);
+  const velocityCutoff = daysAgoDate(VELOCITY_DAYS);
+  const CHUNK = 200;
+
+  const allStats: Array<{
+    item_id: string;
+    stat_date: string;
+    median: number;
+    volume: number;
+  }> = [];
+  for (let i = 0; i < itemIds.length; i += CHUNK) {
+    const chunk = itemIds.slice(i, i + CHUNK);
+    const rows = await fetchAllRows<(typeof allStats)[number]>((from, to) =>
+      db
+        .from("trade_stats")
+        .select("item_id, stat_date, median, volume")
+        .in("item_id", chunk)
+        .eq("mod_rank", -1)
+        .gte("stat_date", velocityCutoff)
+        .order("stat_date", { ascending: false })
+        .order("item_id", { ascending: true })
+        .range(from, to),
+    );
+    allStats.push(...rows);
+  }
+
+  const latestMedian = new Map<string, number>();
+  const volumeByItem = new Map<string, number[]>();
+  for (const row of allStats) {
+    if (!latestMedian.has(row.item_id) && row.median > 0) {
+      latestMedian.set(row.item_id, Number(row.median));
+    }
+    if (!volumeByItem.has(row.item_id)) volumeByItem.set(row.item_id, []);
+    volumeByItem.get(row.item_id)!.push(Number(row.volume ?? 0));
+  }
+
+  const allOrders: Array<{
+    id: number;
+    item_id: string;
+    price: number;
+    quantity: number;
+    mod_rank: number | null;
+    seller_name: string;
+  }> = [];
+  for (let i = 0; i < itemIds.length; i += CHUNK) {
+    const chunk = itemIds.slice(i, i + CHUNK);
+    const rows = await fetchAllRows<(typeof allOrders)[number]>((from, to) =>
+      db
+        .from("order_snapshots")
+        .select("id, item_id, price, quantity, mod_rank, seller_name")
+        .eq("sweep_id", sweepId)
+        .in("item_id", chunk)
+        .order("price", { ascending: true })
+        .order("id", { ascending: true })
+        .range(from, to),
+    );
+    allOrders.push(...rows);
+  }
+
+  const ordersByItem = new Map<string, typeof allOrders>();
+  for (const o of allOrders) {
+    if (!ordersByItem.has(o.item_id)) ordersByItem.set(o.item_id, []);
+    ordersByItem.get(o.item_id)!.push(o);
+  }
+
+  interface RankingRow {
+    sweep_id: number;
+    item_id: string;
+    rank: number;
+    ppd: number;
+    ppd_at_n: number | null;
+    velocity: number;
+    score: number;
+    shallow: boolean;
+    orders_json: unknown;
+  }
+
+  const ranked: RankingRow[] = [];
+  for (const item of items) {
+    const median = latestMedian.get(item.id as string);
+    if (!median || median <= 0) continue;
+
+    const ducats = item.ducats as number;
+    const ppd = ducats / median;
+
+    const volumes = volumeByItem.get(item.id as string) ?? [];
+    const velocity = computeVelocity(volumes, VELOCITY_DAYS);
+
+    const orders = ordersByItem.get(item.id as string) ?? [];
+    const { ppdAtN: ppd_at_n, shallow } = computePpdAtN(orders, ducats, PPD_N);
+
+    const effectivePpd = ppd_at_n ?? ppd;
+    const score = effectivePpd * Math.min(1, velocity / VELOCITY_LIQUID);
+
+    ranked.push({
+      sweep_id: sweepId,
+      item_id: item.id as string,
+      rank: 0,
+      ppd: Math.round(ppd * 1000) / 1000,
+      ppd_at_n: ppd_at_n !== null ? Math.round(ppd_at_n * 1000) / 1000 : null,
+      velocity: Math.round(velocity * 10) / 10,
+      score: Math.round(score * 1000) / 1000,
+      shallow,
+      orders_json: orders.map((o) => ({
+        price: o.price,
+        quantity: o.quantity,
+        mod_rank: o.mod_rank,
+        seller_name: o.seller_name,
+      })),
+    });
+  }
+
+  ranked.sort((a, b) => b.score - a.score);
+  ranked.forEach((r, i) => (r.rank = i + 1));
+
+  const junkRate = computeJunkRateFromRanked(ranked.map((r) => ({
+    ppd_at_n: r.ppd_at_n,
+    shallow: r.shallow,
+  })));
+
+  const BATCH = 100;
+  for (let i = 0; i < ranked.length; i += BATCH) {
+    const batch = ranked.slice(i, i + BATCH);
+    const { error } = await db.from("rankings").insert(batch);
+    if (error) {
+      console.warn(`  Rankings batch insert error: ${error.message}`);
+    }
+  }
+
+  const { error: jrErr } = await db
+    .from("sweeps")
+    .update({ junk_rate: junkRate })
+    .eq("id", sweepId);
+  if (jrErr) {
+    console.warn(`  Junk rate update error: ${jrErr.message}`);
+  }
+
+  console.log(
+    `Rankings: ${ranked.length} rows written, junk_rate=${junkRate.toFixed(4)}`,
+  );
+}
+
 async function main() {
   console.log("=== Ducat2Plat sweep ===\n");
 
@@ -615,6 +853,9 @@ async function main() {
       `Sweep #${sweepId} completed (${totalOk} ok, ${totalFailed} failed, ${(rate * 100).toFixed(1)}%)`,
     );
 
+    console.log("\n--- Rankings ---");
+    await computeAndWriteRankings(sweepId);
+
     const failRate = processed > 0 ? totalFailed / processed : 0;
     if (violations.length > 0 || failRate > 0.1) {
       console.warn(
@@ -631,6 +872,10 @@ async function main() {
 
   console.log("\n--- Retention ---");
   await pruneOldSnapshots();
+  await pruneOldRankings();
+
+  console.log("\n--- Telemetry ---");
+  await appendRowCountTelemetry(sweepId);
 }
 
 main().catch((err) => {

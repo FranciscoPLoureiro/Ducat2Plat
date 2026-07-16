@@ -1,5 +1,4 @@
 import {
-  getStaleness,
   getBaroCountdown,
   getBaroVisits,
   getBaroItemHistory,
@@ -8,13 +7,13 @@ import {
 import BaroInventory from "../components/baro-inventory";
 import BaroHistory from "../components/baro-history";
 import PrimedModCharts from "../components/primed-mod-charts";
+import StalenessBanner from "../components/staleness-banner";
 
-export const dynamic = "force-dynamic";
+export const revalidate = 3600;
 
 export default async function BaroPage() {
-  const [staleness, countdown, baroResult, itemHistory, primedMods] =
+  const [countdown, baroResult, itemHistory, primedMods] =
     await Promise.all([
-      getStaleness(),
       getBaroCountdown(),
       getBaroVisits(),
       getBaroItemHistory(),
@@ -27,11 +26,7 @@ export default async function BaroPage() {
 
   return (
     <div className="max-w-7xl mx-auto px-4 py-6">
-      {staleness.stale && (
-        <div className="mb-4 px-4 py-3 rounded bg-yellow-900/60 border border-yellow-700 text-yellow-200 text-sm">
-          Data is {staleness.hoursAgo ?? "??"} hours old — pipeline may be down.
-        </div>
-      )}
+      <StalenessBanner />
 
       <header className="flex items-center justify-between mb-6">
         <h1 className="text-xl font-bold tracking-tight">Baro Ki&apos;Teer</h1>

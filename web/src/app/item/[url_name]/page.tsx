@@ -1,9 +1,10 @@
 import Link from "next/link";
-import { getStaleness, getItemDetail } from "@/lib/data";
+import { getItemDetail } from "@/lib/data";
 import ItemDetailChart from "../../components/item-detail-chart";
+import StalenessBanner from "../../components/staleness-banner";
 import { notFound } from "next/navigation";
 
-export const dynamic = "force-dynamic";
+export const revalidate = 3600;
 
 export default async function ItemPage({
   params,
@@ -11,20 +12,13 @@ export default async function ItemPage({
   params: Promise<{ url_name: string }>;
 }) {
   const { url_name } = await params;
-  const [staleness, item] = await Promise.all([
-    getStaleness(),
-    getItemDetail(url_name),
-  ]);
+  const item = await getItemDetail(url_name);
 
   if (!item) notFound();
 
   return (
     <div className="max-w-7xl mx-auto px-4 py-6">
-      {staleness.stale && (
-        <div className="mb-4 px-4 py-3 rounded bg-yellow-900/60 border border-yellow-700 text-yellow-200 text-sm">
-          Data is {staleness.hoursAgo ?? "??"} hours old — pipeline may be down.
-        </div>
-      )}
+      <StalenessBanner />
 
       <header className="mb-6">
         <div className="text-sm text-zinc-500 mb-1">

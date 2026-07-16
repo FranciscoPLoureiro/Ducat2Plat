@@ -1,3 +1,13 @@
 import { defineConfig } from "vitest/config";
+import path from "path";
 
-export default defineConfig({});
+export default defineConfig({
+  resolve: {
+    alias: {
+      "@shared": path.resolve(__dirname, "../shared"),
+    },
+  },
+  test: {
+    include: ["src/**/*.test.ts", "../shared/**/*.test.ts"],
+  },
+});
