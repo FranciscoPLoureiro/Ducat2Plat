@@ -1,0 +1,46 @@
+name: Weekly Backup
+
+on:
+  schedule:
+    - cron: '0 3 * * 0'
+  workflow_dispatch:
+
+jobs:
+  backup:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+
+    steps:
+      - name: Install PostgreSQL 15 client
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq postgresql-client-15
+
+      - name: Set backup date
+        id: date
+        run: echo "date=$(date -u +%Y-%m-%d)" >> "$GITHUB_OUTPUT"
+
+      - name: Dump database
+        env:
+          SUPABASE_DB_URL: ${{ secrets.SUPABASE_DB_URL }}
+        run: pg_dump --no-owner --no-privileges "$SUPABASE_DB_URL" | gzip > "backup-${{ steps.date.outputs.date }}.sql.gz"
+
+      - name: Upload backup artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: db-backup-${{ steps.date.outputs.date }}
+          path: backup-*.sql.gz
+          retention-days: 90
+
+      - name: Alert backup failure
+        if: failure()
+        env:
+          DISCORD_WEBHOOK_URL: ${{ secrets.DISCORD_WEBHOOK_URL }}
+        run: |
+          curl -sS -H "Content-Type: application/json" -d '{
+            "embeds": [{
+              "title": "❌ Database Backup Failed",
+              "description": "The weekly database backup workflow failed.\n\n**Workflow:** ${{ github.workflow }}\n**Run:** [View logs](${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }})",
+              "color": 15158332
+            }]
+          }' "$DISCORD_WEBHOOK_URL"

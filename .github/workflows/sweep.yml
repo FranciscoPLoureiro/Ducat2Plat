@@ -26,11 +26,47 @@ jobs:
         run: npm ci
 
       - name: Run sweep
+        id: sweep
         working-directory: worker
         env:
           SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
           SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
-        run: npm run sweep
+        run: |
+          set +e
+          npm run sweep
+          code=$?
+          echo "exit_code=$code" >> "$GITHUB_OUTPUT"
+          if [ "$code" -eq 2 ]; then
+            echo "::warning::Sweep completed with degraded results (>10% failures)"
+            exit 0
+          fi
+          exit $code
+
+      - name: Alert degraded sweep
+        if: steps.sweep.outputs.exit_code == '2'
+        env:
+          DISCORD_WEBHOOK_URL: ${{ secrets.DISCORD_WEBHOOK_URL }}
+        run: |
+          curl -sS -H "Content-Type: application/json" -d '{
+            "embeds": [{
+              "title": "⚠️ Degraded Sweep",
+              "description": "Sweep completed but with >10% item failures.\n\n**Workflow:** ${{ github.workflow }}\n**Run:** [View logs](${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }})",
+              "color": 16750848
+            }]
+          }' "$DISCORD_WEBHOOK_URL"
+
+      - name: Alert sweep failure
+        if: failure()
+        env:
+          DISCORD_WEBHOOK_URL: ${{ secrets.DISCORD_WEBHOOK_URL }}
+        run: |
+          curl -sS -H "Content-Type: application/json" -d '{
+            "embeds": [{
+              "title": "❌ Sweep Failed",
+              "description": "The daily sweep workflow failed.\n\n**Workflow:** ${{ github.workflow }}\n**Run:** [View logs](${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }})",
+              "color": 15158332
+            }]
+          }' "$DISCORD_WEBHOOK_URL"
 
   keepalive:
     runs-on: ubuntu-latest

@@ -493,6 +493,14 @@ async function main() {
     console.log(
       `Sweep #${sweepId} completed (${totalOk} ok, ${totalFailed} failed, ${(rate * 100).toFixed(1)}%)`,
     );
+
+    const failRate = processed > 0 ? totalFailed / processed : 0;
+    if (failRate > 0.1) {
+      console.warn(
+        `Sweep #${sweepId} degraded: ${(failRate * 100).toFixed(1)}% item failures exceed 10% threshold`,
+      );
+      process.exit(2);
+    }
   } else {
     console.error(
       `Sweep #${sweepId} NOT completed: ${(rate * 100).toFixed(1)}% success (need >=90%)`,
