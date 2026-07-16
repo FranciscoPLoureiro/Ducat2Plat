@@ -21,6 +21,9 @@ jobs:
         with:
           node-version: 24
 
+      - name: Pin npm to match committed lockfiles
+        run: npm install -g npm@11.6.2
+
       - name: Install dependencies
         working-directory: worker
         run: npm ci
