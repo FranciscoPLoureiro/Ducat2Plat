@@ -1,8 +1,19 @@
+import type { Metadata } from "next";
 import Link from "next/link";
 import { getItemDetail } from "@/lib/data";
 import ItemDetailChart from "../../components/item-detail-chart";
 import StalenessBanner from "../../components/staleness-banner";
 import { notFound } from "next/navigation";
+
+export async function generateMetadata({
+  params,
+}: {
+  params: Promise<{ url_name: string }>;
+}): Promise<Metadata> {
+  const { url_name } = await params;
+  const name = url_name.replace(/_/g, " ").replace(/\b\w/g, (c) => c.toUpperCase());
+  return { title: name };
+}
 
 export const revalidate = 3600;
 
@@ -28,7 +39,7 @@ export default async function ItemPage({
           {" / "}
           <span className="text-zinc-300">{item.item_name}</span>
         </div>
-        <div className="flex items-center gap-3">
+        <div className="flex flex-wrap items-center gap-3">
           <h1 className="text-xl font-bold tracking-tight">{item.item_name}</h1>
           {item.ducats !== null && (
             <span className="text-sm text-amber-400 font-medium">

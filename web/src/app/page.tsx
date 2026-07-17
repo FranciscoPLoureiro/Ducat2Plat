@@ -1,7 +1,10 @@
+import type { Metadata } from "next";
 import { getBaroCountdown, getRankedItems } from "@/lib/data";
 import RankingTable from "./components/ranking-table";
+import DucatPlanner from "./components/ducat-planner";
 import StalenessBanner from "./components/staleness-banner";
 
+export const metadata: Metadata = { title: "Junk Ranking" };
 export const revalidate = 3600;
 
 export default async function Home() {
@@ -14,11 +17,12 @@ export default async function Home() {
     <div className="max-w-7xl mx-auto px-4 py-6">
       <StalenessBanner />
 
-      <header className="flex items-center justify-between mb-6">
+      <header className="flex flex-wrap items-center justify-between gap-3 mb-6">
         <h1 className="text-xl font-bold tracking-tight">Junk Ranking</h1>
         <BaroWidget baro={baro} />
       </header>
 
+      <DucatPlanner items={items} />
       <RankingTable items={items} />
     </div>
   );

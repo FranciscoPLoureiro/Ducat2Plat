@@ -1,3 +1,4 @@
+import type { Metadata } from "next";
 import {
   getBaroCountdown,
   getBaroVisits,
@@ -9,6 +10,7 @@ import BaroHistory from "../components/baro-history";
 import PrimedModCharts from "../components/primed-mod-charts";
 import StalenessBanner from "../components/staleness-banner";
 
+export const metadata: Metadata = { title: "Baro Ki'Teer" };
 export const revalidate = 3600;
 
 export default async function BaroPage() {
@@ -28,7 +30,7 @@ export default async function BaroPage() {
     <div className="max-w-7xl mx-auto px-4 py-6">
       <StalenessBanner />
 
-      <header className="flex items-center justify-between mb-6">
+      <header className="flex flex-wrap items-center justify-between gap-3 mb-6">
         <h1 className="text-xl font-bold tracking-tight">Baro Ki&apos;Teer</h1>
         <BaroCountdownWidget countdown={countdown} />
       </header>
