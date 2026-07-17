@@ -148,3 +148,42 @@ and the `psql` client installed locally.
 1. Create a new webhook in your Discord server > channel settings > Integrations.
 2. Update `DISCORD_WEBHOOK_URL` in GitHub Actions secrets.
 3. Optionally delete the old webhook in Discord.
+
+---
+
+## Data export
+
+Dump the archive tables to CSV for offline analysis or migration:
+
+```bash
+cd worker
+npx tsx scripts/export.ts
+```
+
+Exports `trade_stats`, `baro_visits`, `baro_visit_items`, and `vault_events`
+to `worker/export/` with the current date in the filename (e.g.
+`trade_stats_2026-07-17.csv`). Uses paginated reads — safe to run against
+the production database. The `export/` directory is gitignored.
+
+---
+
+## Quarterly checklist
+
+Perform these checks once per quarter to keep the tool healthy:
+
+- [ ] **Rotate keys.** Follow the "Key rotation" section above for the
+      Supabase anon key, service-role key, and database password. Update
+      `DISCORD_WEBHOOK_URL` if the webhook was regenerated.
+- [ ] **Verify a backup restores.** Download the latest backup artifact from
+      GitHub Actions, restore it into a scratch Supabase project following
+      the "Backup restore procedure" section, and confirm the dashboard
+      loads against it.
+- [ ] **Check Supabase storage %.** In the Supabase Dashboard > Settings >
+      Billing, verify database size is well under the free-tier limit
+      (~500 MB). If above 60%, investigate which table is growing
+      unexpectedly (run the export script and check row counts).
+- [ ] **Check GitHub Actions minutes usage.** In the repo Settings >
+      Billing, verify the monthly minutes consumed by sweep + backup +
+      CI workflows are within the free-tier allowance (2000 min/month).
+      If approaching the limit, consider reducing CI trigger frequency
+      or sweep scheduling.
