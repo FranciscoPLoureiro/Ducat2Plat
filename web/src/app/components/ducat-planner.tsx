@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useMemo, useEffect, useCallback } from "react";
+import { useState, useMemo, useCallback } from "react";
 import type { RankedItem } from "@/lib/data";
 
 const LS_KEY_HAVE = "d2p_ducats_have";
@@ -119,20 +119,23 @@ function buildWhisper(group: SellerGroup): string {
   return `/w ${group.seller_name} Hi! WTB: ${itemList} for ${group.total_plat}p (warframe.market)`;
 }
 
+// Safe to read in a useState initializer: the panel renders closed, so these
+// values never appear in server-rendered HTML and cannot cause a hydration
+// mismatch.
+function readStoredNumber(key: string): number {
+  if (typeof window === "undefined") return 0;
+  try {
+    return Number(localStorage.getItem(key)) || 0;
+  } catch {
+    return 0;
+  }
+}
+
 export default function DucatPlanner({ items }: { items: RankedItem[] }) {
   const [open, setOpen] = useState(false);
-  const [ducatsHave, setDucatsHave] = useState(0);
-  const [ducatsNeed, setDucatsNeed] = useState(0);
+  const [ducatsHave, setDucatsHave] = useState(() => readStoredNumber(LS_KEY_HAVE));
+  const [ducatsNeed, setDucatsNeed] = useState(() => readStoredNumber(LS_KEY_NEED));
   const [copied, setCopied] = useState<string | null>(null);
-
-  useEffect(() => {
-    try {
-      const h = localStorage.getItem(LS_KEY_HAVE);
-      const n = localStorage.getItem(LS_KEY_NEED);
-      if (h) setDucatsHave(Number(h));
-      if (n) setDucatsNeed(Number(n));
-    } catch {}
-  }, []);
 
   const updateHave = useCallback((v: number) => {
     setDucatsHave(v);
