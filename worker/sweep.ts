@@ -3,11 +3,11 @@ config({ path: ".env.local" });
 
 import { createClient } from "@supabase/supabase-js";
 import {
-  WfmItemsResponseSchema,
-  WfmStatisticsResponseSchema,
-  WfmOrdersResponseSchema,
-  VoidTraderResponseSchema,
-} from "./wfm-schemas";
+  fetchItems,
+  fetchStatistics,
+  fetchOrders,
+  fetchVoidTrader,
+} from "./wfm";
 import {
   computePpdAtN,
   computeVelocity,
@@ -26,48 +26,6 @@ if (!SUPABASE_URL || !SUPABASE_KEY) {
 
 const db = createClient(SUPABASE_URL, SUPABASE_KEY);
 
-const WFM_V1 = "https://api.warframe.market/v1";
-const WFM_V2 = "https://api.warframe.market/v2";
-const RATE_MS = 400; // 2.5 req/s
-let lastReq = 0;
-
-function sleep(ms: number) {
-  return new Promise<void>((r) => setTimeout(r, ms));
-}
-
-async function wfmFetch(url: string): Promise<unknown> {
-  const gap = RATE_MS - (Date.now() - lastReq);
-  if (gap > 0) await sleep(gap);
-  lastReq = Date.now();
-
-  for (let attempt = 1; attempt <= 5; attempt++) {
-    const res = await fetch(url, {
-      headers: {
-        Accept: "application/json",
-        Platform: "pc",
-        Language: "en",
-        "User-Agent": "Ducat2Plat/1.0 (+https://github.com/FranciscoPLoureiro/Ducat2Plat)",
-      },
-    });
-
-    if (res.status === 429 || res.status === 503) {
-      if (attempt < 5) {
-        const delay = 1000 * 2 ** (attempt - 1);
-        console.warn(
-          `  ${res.status} on ${url}, backoff ${delay}ms (${attempt}/5)`,
-        );
-        await sleep(delay);
-        lastReq = Date.now();
-        continue;
-      }
-      throw new Error(`${res.status} after 5 attempts: ${url}`);
-    }
-
-    if (!res.ok) throw new Error(`HTTP ${res.status}: ${url}`);
-    return await res.json();
-  }
-}
-
 // Step 1
 async function openSweep(): Promise<number> {
   const { data, error } = await db
@@ -85,15 +43,10 @@ async function syncCatalog(): Promise<{
   ok: number;
   failed: number;
 }> {
-  const rawJson = await wfmFetch(`${WFM_V2}/items`);
-  const parsed = WfmItemsResponseSchema.safeParse(rawJson);
-  if (!parsed.success) {
-    console.warn(
-      `Items API schema validation failed: ${parsed.error.issues[0]?.message}`,
-    );
+  const apiItems = await fetchItems();
+  if (!apiItems) {
     return { total: 0, ok: 0, failed: 0 };
   }
-  const apiItems = parsed.data.data;
   console.log(`API: ${apiItems.length} items`);
 
   const known = new Set<string>();
@@ -185,18 +138,11 @@ async function fetchStats(
 
   for (const item of items) {
     try {
-      const rawJson = await wfmFetch(
-        `${WFM_V1}/items/${item.url_name}/statistics`,
-      );
-      const parsed = WfmStatisticsResponseSchema.safeParse(rawJson);
-      if (!parsed.success) {
-        console.warn(
-          `  ${item.url_name}: schema validation: ${parsed.error.issues[0]?.message}`,
-        );
+      const closed = await fetchStatistics(item.url_name);
+      if (closed === null) {
         failed++;
         continue;
       }
-      const closed = parsed.data.payload.statistics_closed["90days"];
       if (!closed.length) {
         ok++;
         continue;
@@ -291,18 +237,11 @@ async function fetchOrderDepth(
 
   for (const item of candidates) {
     try {
-      const rawJson = await wfmFetch(
-        `${WFM_V2}/orders/item/${item.url_name}`,
-      );
-      const parsed = WfmOrdersResponseSchema.safeParse(rawJson);
-      if (!parsed.success) {
-        console.warn(
-          `  ${item.url_name}: orders schema validation: ${parsed.error.issues[0]?.message}`,
-        );
+      const orders = await fetchOrders(item.url_name);
+      if (orders === null) {
         failed++;
         continue;
       }
-      const orders = parsed.data.data;
 
       const ingameSells = orders
         .filter((o) => o.type === "sell" && o.user.status === "ingame")
@@ -342,34 +281,8 @@ async function fetchOrderDepth(
 
 // Step 5 — Baro Ki'Teer
 async function fetchBaro(): Promise<void> {
-  const BARO_URL = "https://api.warframestat.us/pc/voidTrader";
-  let rawBaroData: unknown;
-  try {
-    const res = await fetch(BARO_URL, {
-      headers: {
-        Accept: "application/json",
-        "User-Agent": "Ducat2Plat/1.0 (+https://github.com/FranciscoPLoureiro/Ducat2Plat)",
-      },
-    });
-    if (!res.ok) {
-      console.warn(`Baro API returned ${res.status}`);
-      return;
-    }
-    rawBaroData = await res.json();
-  } catch (err) {
-    const msg = err instanceof Error ? err.message : String(err);
-    console.warn(`Baro fetch failed: ${msg}`);
-    return;
-  }
-
-  const baroParsed = VoidTraderResponseSchema.safeParse(rawBaroData);
-  if (!baroParsed.success) {
-    console.warn(
-      `Baro API schema validation failed: ${baroParsed.error.issues[0]?.message}`,
-    );
-    return;
-  }
-  const baro = baroParsed.data;
+  const baro = await fetchVoidTrader();
+  if (!baro) return;
 
   const arrival = baro.activation;
   const departure = baro.expiry;
@@ -467,7 +380,7 @@ const VALID_DUCATS = new Set([15, 25, 45, 65, 100]);
 async function checkDataQuality(sweepId: number): Promise<string[]> {
   const violations: string[] = [];
 
-  // 1. Ducats of junk items ∈ {15,25,45,65,100}
+  // 1. Ducats of junk items must be in {15,25,45,65,100}
   const { data: junkData } = await db
     .from("prime_items")
     .select("url_name, ducats")
@@ -494,7 +407,7 @@ async function checkDataQuality(sweepId: number): Promise<string[]> {
     violations.push(`${badMedians} trade_stats rows with median <= 0`);
   }
 
-  // 3. Stats row count within 0.5×–2× of the previous sweep
+  // 3. Stats row count within 0.5x-2x of the previous sweep
   const { count: currentStatsRows } = await db
     .from("trade_stats")
     .select("*", { count: "exact", head: true })
@@ -516,7 +429,7 @@ async function checkDataQuality(sweepId: number): Promise<string[]> {
         const ratio = currentStatsRows / prevRows;
         if (ratio < 0.5 || ratio > 2) {
           violations.push(
-            `Stats row count ${currentStatsRows} is ${ratio.toFixed(2)}× previous (${prevRows})`,
+            `Stats row count ${currentStatsRows} is ${ratio.toFixed(2)}x previous (${prevRows})`,
           );
         }
       }
