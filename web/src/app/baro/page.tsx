@@ -4,22 +4,25 @@ import {
   getBaroVisits,
   getBaroItemHistory,
   getPrimedModStats,
+  getBaroAdvisorData,
 } from "@/lib/data";
 import BaroInventory from "../components/baro-inventory";
 import BaroHistory from "../components/baro-history";
 import PrimedModCharts from "../components/primed-mod-charts";
+import BaroAdvisor from "../components/baro-advisor";
 import StalenessBanner from "../components/staleness-banner";
 
 export const metadata: Metadata = { title: "Baro Ki'Teer" };
 export const revalidate = 3600;
 
 export default async function BaroPage() {
-  const [countdown, baroResult, itemHistory, primedMods] =
+  const [countdown, baroResult, itemHistory, primedMods, advisorData] =
     await Promise.all([
       getBaroCountdown(),
       getBaroVisits(),
       getBaroItemHistory(),
       getPrimedModStats(),
+      getBaroAdvisorData(),
     ]);
 
   const { visits, junkRate, activeVisit } = baroResult;
@@ -34,6 +37,15 @@ export default async function BaroPage() {
         <h1 className="text-xl font-bold tracking-tight">Baro Ki&apos;Teer</h1>
         <BaroCountdownWidget countdown={countdown} />
       </header>
+
+      {advisorData && advisorData.mods.length > 0 && (
+        <section className="mb-8">
+          <h2 className="text-lg font-semibold mb-3 text-emerald-400">
+            Hold Advisor
+          </h2>
+          <BaroAdvisor data={advisorData} />
+        </section>
+      )}
 
       {activeVisit && activeVisit.items.length > 0 && (
         <section className="mb-8">

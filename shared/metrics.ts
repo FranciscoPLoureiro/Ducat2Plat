@@ -68,3 +68,208 @@ export function isSpecialVisit(
 ): boolean {
   return (relay != null && /tennocon/i.test(relay)) || itemCount >= 150;
 }
+
+// ── Recovery Curve & Advisor (M12) ──────────────────────────────────
+
+export const RECOVERY_THRESHOLD = 0.95;
+export const MAX_RECOVERY_DAYS = 42;
+export const BASELINE_WINDOW_DAYS = 30;
+export const BARO_CYCLE_DAYS = 14;
+
+export interface DailyPrice {
+  date: string;
+  median: number;
+}
+
+export interface NormalizedPoint {
+  day: number;
+  value: number;
+}
+
+export interface RecoveryCurvePoint {
+  day: number;
+  median: number;
+}
+
+export type Verdict = "BUY & HOLD" | "BUY & FLIP" | "SKIP";
+
+export interface BasketCandidate {
+  index: number;
+  ducatCost: number;
+  profitPerDucat: number;
+}
+
+export function computeMedian(values: number[]): number | null {
+  if (values.length === 0) return null;
+  const sorted = [...values].sort((a, b) => a - b);
+  const mid = Math.floor(sorted.length / 2);
+  return sorted.length % 2 === 0
+    ? (sorted[mid - 1] + sorted[mid]) / 2
+    : sorted[mid];
+}
+
+export function computeBaseline(
+  prices: DailyPrice[],
+  beforeDate: string,
+  windowDays: number = BASELINE_WINDOW_DAYS,
+): number | null {
+  const before = new Date(beforeDate).getTime();
+  const windowStart = before - windowDays * 86_400_000;
+  const windowPrices = prices
+    .filter((p) => {
+      const t = new Date(p.date).getTime();
+      return t >= windowStart && t < before;
+    })
+    .map((p) => p.median);
+  return computeMedian(windowPrices);
+}
+
+export function buildRecoverySeries(
+  prices: DailyPrice[],
+  departureDate: string,
+  baseline: number,
+  maxDays: number = MAX_RECOVERY_DAYS,
+): NormalizedPoint[] {
+  if (baseline <= 0) return [];
+  const depDate = departureDate.slice(0, 10);
+  const depTime = new Date(depDate + "T00:00:00Z").getTime();
+  const result: NormalizedPoint[] = [];
+  for (const p of prices) {
+    const pTime = new Date(p.date + "T00:00:00Z").getTime();
+    const day = Math.round((pTime - depTime) / 86_400_000);
+    if (day >= 0 && day <= maxDays) {
+      result.push({ day, value: p.median / baseline });
+    }
+  }
+  result.sort((a, b) => a.day - b.day);
+  return result;
+}
+
+export function poolMedianCurve(
+  allSeries: NormalizedPoint[][],
+  maxDays: number = MAX_RECOVERY_DAYS,
+): RecoveryCurvePoint[] {
+  if (allSeries.length === 0) return [];
+  const byDay = new Map<number, number[]>();
+  for (const series of allSeries) {
+    for (const point of series) {
+      if (!byDay.has(point.day)) byDay.set(point.day, []);
+      byDay.get(point.day)!.push(point.value);
+    }
+  }
+  const curve: RecoveryCurvePoint[] = [];
+  for (let day = 0; day <= maxDays; day++) {
+    const values = byDay.get(day);
+    if (!values?.length) continue;
+    const med = computeMedian(values);
+    if (med !== null) curve.push({ day, median: med });
+  }
+  return curve;
+}
+
+export function extractRecoveryDays(
+  curve: RecoveryCurvePoint[],
+  threshold: number = RECOVERY_THRESHOLD,
+): number | null {
+  for (const point of curve) {
+    if (point.median >= threshold) return point.day;
+  }
+  return null;
+}
+
+export function computeRestockInterval(
+  visitIndices: number[],
+): number | null {
+  if (visitIndices.length < 2) return null;
+  const sorted = [...visitIndices].sort((a, b) => a - b);
+  const gaps: number[] = [];
+  for (let i = 1; i < sorted.length; i++) {
+    gaps.push(sorted[i] - sorted[i - 1]);
+  }
+  return computeMedian(gaps);
+}
+
+export function computeBaselineDrift(
+  prices: DailyPrice[],
+  referenceDate: string,
+  shortWindowDays: number = 90,
+  longWindowDays: number = 365,
+): { drift: number; shortBaseline: number; longBaseline: number } | null {
+  const shortBaseline = computeBaseline(prices, referenceDate, shortWindowDays);
+  const longBaseline = computeBaseline(prices, referenceDate, longWindowDays);
+  if (shortBaseline === null || longBaseline === null || longBaseline === 0)
+    return null;
+  return {
+    drift: (shortBaseline - longBaseline) / longBaseline,
+    shortBaseline,
+    longBaseline,
+  };
+}
+
+export function isInTennoConWindow(
+  specialVisitDates: string[],
+  currentDate: string,
+  windowWeeks: number = 6,
+): boolean {
+  const current = new Date(currentDate).getTime();
+  const windowMs = windowWeeks * 7 * 86_400_000;
+  for (const dateStr of specialVisitDates) {
+    const visitTime = new Date(dateStr).getTime();
+    const diff = visitTime - current;
+    if (diff >= 0 && diff <= windowMs) return true;
+  }
+  return false;
+}
+
+export function computeAdvisorVerdict(
+  sellNowProfit: number,
+  holdProfit: number | null,
+  holdDays: number | null,
+  ducatCost: number,
+): {
+  verdict: Verdict;
+  profitPerDay: number | null;
+  profitPerDucat: number;
+} {
+  if (holdProfit === null || holdDays === null || holdDays <= 0) {
+    if (sellNowProfit > 0) {
+      return {
+        verdict: "BUY & FLIP",
+        profitPerDay: null,
+        profitPerDucat: ducatCost > 0 ? sellNowProfit / ducatCost : 0,
+      };
+    }
+    return { verdict: "SKIP", profitPerDay: null, profitPerDucat: 0 };
+  }
+  const bestProfit = Math.max(sellNowProfit, holdProfit);
+  if (bestProfit <= 0) {
+    return { verdict: "SKIP", profitPerDay: null, profitPerDucat: 0 };
+  }
+  const profitPerDucat = ducatCost > 0 ? bestProfit / ducatCost : 0;
+  if (holdProfit > sellNowProfit) {
+    return {
+      verdict: "BUY & HOLD",
+      profitPerDay: (holdProfit - sellNowProfit) / holdDays,
+      profitPerDucat,
+    };
+  }
+  return { verdict: "BUY & FLIP", profitPerDay: null, profitPerDucat };
+}
+
+export function greedyBasketOptimize(
+  items: BasketCandidate[],
+  ducatWallet: number,
+): number[] {
+  const sorted = items
+    .filter((i) => i.profitPerDucat > 0)
+    .sort((a, b) => b.profitPerDucat - a.profitPerDucat);
+  const selected: number[] = [];
+  let remaining = ducatWallet;
+  for (const item of sorted) {
+    if (item.ducatCost <= remaining) {
+      selected.push(item.index);
+      remaining -= item.ducatCost;
+    }
+  }
+  return selected;
+}
