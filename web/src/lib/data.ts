@@ -2,6 +2,17 @@ import { getSupabase } from "./supabase";
 import {
   computeBaroRoi,
   isSpecialVisit,
+  computeBaseline,
+  buildRecoverySeries,
+  poolMedianCurve,
+  extractRecoveryDays,
+  computeRestockInterval,
+  computeBaselineDrift,
+  isInTennoConWindow,
+  computeAdvisorVerdict,
+  BARO_CYCLE_DAYS,
+  type DailyPrice,
+  type NormalizedPoint,
 } from "./metrics";
 
 const RESALE_WINDOW_DAYS = 30;
@@ -645,4 +656,335 @@ export async function getPrimedModStats(): Promise<PrimedModStats[]> {
       vault_events: vaultByMod.get(m.id) ?? [],
     }))
     .filter((m) => m.stats.length > 0);
+}
+
+// ── Baro Hold Advisor (M12) ─────────────────────────────────────────
+
+export type MaturityStage = "A" | "B" | "C";
+
+export interface AdvisorModResult {
+  itemName: string;
+  urlName: string | null;
+  itemId: string | null;
+  ducatCost: number;
+  creditCost: number;
+  resaleMedian: number | null;
+  baseline: number | null;
+  sellNowProfit: number;
+  holdProfit: number | null;
+  holdDays: number | null;
+  profitPerDay: number | null;
+  profitPerDucat: number;
+  verdict: import("./metrics").Verdict;
+  restockRisk: boolean;
+  restockIntervalDays: number | null;
+  n: number;
+  stage: MaturityStage;
+  stageLabel: string;
+  baselineDrift: { drift: number; shortBaseline: number; longBaseline: number } | null;
+}
+
+export interface AdvisorData {
+  mods: AdvisorModResult[];
+  isSpecialVisit: boolean;
+  isTennoConWindow: boolean;
+  archiveMonths: number;
+}
+
+export async function getBaroAdvisorData(): Promise<AdvisorData | null> {
+  const db = getSupabase();
+  const junkRate = await computeJunkRate();
+
+  // 1. Get all visits (chronological, newest first)
+  const { data: allVisitsRaw } = await db
+    .from("baro_visits")
+    .select("id, arrival, departure, relay")
+    .order("arrival", { ascending: false });
+
+  if (!allVisitsRaw?.length) return null;
+
+  // Fetch item counts per visit to compute is_special
+  const visitIdList = (allVisitsRaw as { id: number }[]).map((v) => v.id);
+  const visitItemCounts = new Map<number, number>();
+  const itemCountRows = await fetchAll<{ visit_id: number }>((from, to) =>
+    db
+      .from("baro_visit_items")
+      .select("visit_id")
+      .in("visit_id", visitIdList)
+      .order("visit_id", { ascending: true })
+      .range(from, to),
+  );
+  for (const r of itemCountRows) {
+    visitItemCounts.set(r.visit_id, (visitItemCounts.get(r.visit_id) ?? 0) + 1);
+  }
+
+  const allVisits = (allVisitsRaw as {
+    id: number; arrival: string; departure: string;
+    relay: string | null;
+  }[]).map((v) => ({
+    ...v,
+    is_special: isSpecialVisit(v.relay, visitItemCounts.get(v.id) ?? 0),
+  }));
+
+  // Find active visit
+  const now = Date.now();
+  const activeVisit = allVisits.find((v) => {
+    const arr = new Date(v.arrival).getTime();
+    const dep = new Date(v.departure).getTime();
+    return now >= arr && now < dep;
+  });
+  if (!activeVisit) return null;
+
+  // 2. Get active visit items
+  const { data: activeItems } = await db
+    .from("baro_visit_items")
+    .select("item_name, ducat_cost, credit_cost, item_id")
+    .eq("visit_id", activeVisit.id);
+
+  if (!activeItems?.length) return null;
+
+  const visitItems = activeItems as {
+    item_name: string; ducat_cost: number; credit_cost: number;
+    item_id: string | null;
+  }[];
+
+  // Filter to primed mods
+  const primedItemIds = visitItems
+    .filter((vi) => vi.item_id !== null)
+    .map((vi) => vi.item_id!);
+
+  if (primedItemIds.length === 0) return null;
+
+  const primeItemMap = new Map<string, { is_primed_mod: boolean; url_name: string }>();
+  const CHUNK = 200;
+  for (let i = 0; i < primedItemIds.length; i += CHUNK) {
+    const chunk = primedItemIds.slice(i, i + CHUNK);
+    const { data: items } = await db
+      .from("prime_items")
+      .select("id, is_primed_mod, url_name")
+      .in("id", chunk);
+    if (items) for (const it of items) {
+      primeItemMap.set(it.id, { is_primed_mod: it.is_primed_mod, url_name: it.url_name });
+    }
+  }
+
+  const primedMods = visitItems.filter((vi) => {
+    const pi = vi.item_id ? primeItemMap.get(vi.item_id) : null;
+    return pi?.is_primed_mod === true;
+  });
+
+  if (primedMods.length === 0) return null;
+
+  // 3. Get all baro_visit_items to find restock events per mod
+  const nonSpecialVisits = allVisits.filter((v) => !v.is_special);
+  const nonSpecialIds = nonSpecialVisits.map((v) => v.id);
+
+  const allBaroItems = await fetchAll<{ visit_id: number; item_id: string | null }>(
+    (from, to) =>
+      db
+        .from("baro_visit_items")
+        .select("visit_id, item_id")
+        .in("visit_id", nonSpecialIds)
+        .order("visit_id", { ascending: true })
+        .order("item_id", { ascending: true })
+        .range(from, to),
+  );
+
+  // Map: item_id → list of visit indices (0 = most recent non-special)
+  const visitIndexMap = new Map<number, number>();
+  nonSpecialVisits.forEach((v, i) => visitIndexMap.set(v.id, i));
+
+  const restockMap = new Map<string, number[]>();
+  for (const bi of allBaroItems) {
+    if (!bi.item_id) continue;
+    const idx = visitIndexMap.get(bi.visit_id);
+    if (idx === undefined) continue;
+    if (!restockMap.has(bi.item_id)) restockMap.set(bi.item_id, []);
+    restockMap.get(bi.item_id)!.push(idx);
+  }
+
+  // 4. Get full rank-0 price history for all primed mods in this visit
+  const primedModIds = primedMods
+    .map((m) => m.item_id)
+    .filter((id): id is string => id !== null);
+
+  const priceHistory = new Map<string, DailyPrice[]>();
+  for (let i = 0; i < primedModIds.length; i += CHUNK) {
+    const chunk = primedModIds.slice(i, i + CHUNK);
+    const stats = await fetchAll<{
+      item_id: string; stat_date: string; median: number;
+    }>((from, to) =>
+      db
+        .from("trade_stats")
+        .select("item_id, stat_date, median")
+        .in("item_id", chunk)
+        .eq("mod_rank", 0)
+        .order("stat_date", { ascending: true })
+        .order("item_id", { ascending: true })
+        .range(from, to),
+    );
+    for (const s of stats) {
+      if (!priceHistory.has(s.item_id)) priceHistory.set(s.item_id, []);
+      priceHistory.get(s.item_id)!.push({
+        date: s.stat_date,
+        median: Number(s.median),
+      });
+    }
+  }
+
+  // 5. Compute archive span
+  let earliestDate: string | null = null;
+  for (const [, prices] of priceHistory) {
+    if (prices.length > 0 && (!earliestDate || prices[0].date < earliestDate)) {
+      earliestDate = prices[0].date;
+    }
+  }
+  const archiveMonths = earliestDate
+    ? Math.floor(
+        (now - new Date(earliestDate).getTime()) / (30.44 * 86_400_000),
+      )
+    : 0;
+
+  // 6. Build recovery series for ALL (mod, restock) pairs
+  const allRecoverySeries: NormalizedPoint[][] = [];
+  const perModSeries = new Map<string, NormalizedPoint[][]>();
+
+  for (const modId of primedModIds) {
+    const prices = priceHistory.get(modId) ?? [];
+    const restockVisitIndices = restockMap.get(modId) ?? [];
+    const modSeries: NormalizedPoint[][] = [];
+
+    for (const visitIdx of restockVisitIndices) {
+      const visit = nonSpecialVisits[visitIdx];
+      if (!visit) continue;
+
+      const baseline = computeBaseline(prices, visit.arrival);
+      if (baseline === null) continue;
+
+      const series = buildRecoverySeries(prices, visit.departure, baseline);
+      if (series.length === 0) continue;
+
+      modSeries.push(series);
+      allRecoverySeries.push(series);
+    }
+
+    if (modSeries.length > 0) {
+      perModSeries.set(modId, modSeries);
+    }
+  }
+
+  const pooledCurve = poolMedianCurve(allRecoverySeries);
+  const pooledRecoveryDays = extractRecoveryDays(pooledCurve);
+
+  // 7. TennoCon window detection
+  const specialVisitDates = allVisits
+    .filter((v) => v.is_special)
+    .map((v) => v.arrival);
+  const isTennoConWindow = isInTennoConWindow(
+    specialVisitDates,
+    new Date().toISOString(),
+  );
+
+  // 8. Compute advisor result per primed mod
+  const results: AdvisorModResult[] = [];
+
+  for (const mod of primedMods) {
+    const pi = mod.item_id ? primeItemMap.get(mod.item_id) : null;
+    const prices = mod.item_id ? (priceHistory.get(mod.item_id) ?? []) : [];
+    const latestPrice = prices.length > 0 ? prices[prices.length - 1].median : null;
+
+    const sellNowProfit =
+      latestPrice !== null
+        ? computeBaroRoi(latestPrice, mod.ducat_cost, junkRate)
+        : 0;
+
+    const baseline = computeBaseline(prices, activeVisit.arrival);
+
+    const holdProfit =
+      baseline !== null
+        ? 0.95 * baseline - mod.ducat_cost * junkRate
+        : null;
+
+    // Stage resolution
+    const modN = mod.item_id
+      ? (perModSeries.get(mod.item_id)?.length ?? 0)
+      : 0;
+
+    let stage: MaturityStage = "A";
+    let stageLabel = "generic estimate";
+    let recoveryDays: number | null = pooledRecoveryDays;
+
+    if (modN >= 3 && mod.item_id) {
+      stage = "B";
+      stageLabel = `per-mod estimate, n=${modN}`;
+      const modCurve = poolMedianCurve(perModSeries.get(mod.item_id)!);
+      recoveryDays = extractRecoveryDays(modCurve);
+    }
+
+    if (archiveMonths >= 12) {
+      stage = modN >= 3 ? "B" : "A";
+      if (modN >= 3) stageLabel = `per-mod estimate, n=${modN}`;
+    }
+
+    // Restock interval
+    const restockIndices = mod.item_id
+      ? (restockMap.get(mod.item_id) ?? [])
+      : [];
+    const restockIntervalVisits = computeRestockInterval(restockIndices);
+    const restockIntervalDays =
+      restockIntervalVisits !== null
+        ? Math.round(restockIntervalVisits * BARO_CYCLE_DAYS)
+        : null;
+    const restockRisk =
+      restockIntervalDays !== null &&
+      recoveryDays !== null &&
+      restockIntervalDays < recoveryDays;
+
+    // Baseline drift (Stage C)
+    let baselineDrift: AdvisorModResult["baselineDrift"] = null;
+    if (archiveMonths >= 12 && prices.length > 0) {
+      stage = modN >= 3 ? "C" : "A";
+      if (stage === "C") stageLabel = `per-mod estimate, n=${modN}`;
+      baselineDrift = computeBaselineDrift(prices, activeVisit.arrival);
+    }
+
+    // Verdict
+    const verdictResult = computeAdvisorVerdict(
+      sellNowProfit,
+      modN >= 3 || allRecoverySeries.length > 0 ? holdProfit : null,
+      modN >= 3 || allRecoverySeries.length > 0 ? recoveryDays : null,
+      mod.ducat_cost,
+    );
+
+    results.push({
+      itemName: mod.item_name,
+      urlName: pi?.url_name ?? null,
+      itemId: mod.item_id,
+      ducatCost: mod.ducat_cost,
+      creditCost: mod.credit_cost,
+      resaleMedian: latestPrice,
+      baseline,
+      sellNowProfit,
+      holdProfit,
+      holdDays: recoveryDays,
+      profitPerDay: verdictResult.profitPerDay,
+      profitPerDucat: verdictResult.profitPerDucat,
+      verdict: verdictResult.verdict,
+      restockRisk,
+      restockIntervalDays,
+      n: modN,
+      stage,
+      stageLabel,
+      baselineDrift,
+    });
+  }
+
+  results.sort((a, b) => b.profitPerDucat - a.profitPerDucat);
+
+  return {
+    mods: results,
+    isSpecialVisit: activeVisit.is_special,
+    isTennoConWindow,
+    archiveMonths,
+  };
 }
