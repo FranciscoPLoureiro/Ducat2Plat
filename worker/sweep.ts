@@ -46,7 +46,7 @@ async function wfmFetch(url: string): Promise<unknown> {
         Accept: "application/json",
         Platform: "pc",
         Language: "en",
-        "User-Agent": "Ducat2Plat/1.0 (https://github.com)",
+        "User-Agent": "Ducat2Plat/1.0 (+https://github.com/FranciscoPLoureiro/Ducat2Plat)",
       },
     });
 
@@ -346,7 +346,10 @@ async function fetchBaro(): Promise<void> {
   let rawBaroData: unknown;
   try {
     const res = await fetch(BARO_URL, {
-      headers: { Accept: "application/json" },
+      headers: {
+        Accept: "application/json",
+        "User-Agent": "Ducat2Plat/1.0 (+https://github.com/FranciscoPLoureiro/Ducat2Plat)",
+      },
     });
     if (!res.ok) {
       console.warn(`Baro API returned ${res.status}`);

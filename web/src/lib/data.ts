@@ -282,6 +282,8 @@ export interface BaroVisitItem {
   url_name: string | null;
   is_primed_mod: boolean;
   resale_median: number | null;
+  resale_median_max_rank: number | null;
+  max_mod_rank: number | null;
   roi: number | null;
 }
 
@@ -318,18 +320,18 @@ export async function getBaroVisits(): Promise<{ visits: BaroVisit[]; junkRate: 
     .map((vi) => vi.item_id)
     .filter((id): id is string => id !== null);
 
-  const primeItemMap = new Map<string, { url_name: string; is_primed_mod: boolean }>();
+  const primeItemMap = new Map<string, { url_name: string; is_primed_mod: boolean; max_mod_rank: number | null }>();
   if (itemIds.length > 0) {
     const CHUNK = 200;
     for (let i = 0; i < itemIds.length; i += CHUNK) {
       const chunk = itemIds.slice(i, i + CHUNK);
       const { data: items } = await db
         .from("prime_items")
-        .select("id, url_name, is_primed_mod")
+        .select("id, url_name, is_primed_mod, max_mod_rank")
         .in("id", chunk);
       if (items) {
         for (const it of items) {
-          primeItemMap.set(it.id, { url_name: it.url_name, is_primed_mod: it.is_primed_mod });
+          primeItemMap.set(it.id, { url_name: it.url_name, is_primed_mod: it.is_primed_mod, max_mod_rank: it.max_mod_rank ?? null });
         }
       }
     }
@@ -340,11 +342,14 @@ export async function getBaroVisits(): Promise<{ visits: BaroVisit[]; junkRate: 
     .map(([id]) => id);
 
   const resaleMap = new Map<string, number>();
+  const resaleMaxRankMap = new Map<string, number>();
   if (primedModIds.length > 0) {
     const resaleCutoff = daysAgoDate(RESALE_WINDOW_DAYS);
     const CHUNK = 200;
     for (let i = 0; i < primedModIds.length; i += CHUNK) {
       const chunk = primedModIds.slice(i, i + CHUNK);
+
+      // Rank-0 resale
       const stats = await fetchAll<{
         item_id: string;
         median: number;
@@ -365,6 +370,32 @@ export async function getBaroVisits(): Promise<{ visits: BaroVisit[]; junkRate: 
           resaleMap.set(s.item_id, Number(s.median));
         }
       }
+
+      // Max-rank resale: fetch all ranks, then pick latest for each item's max rank
+      const maxRankStats = await fetchAll<{
+        item_id: string;
+        mod_rank: number;
+        median: number;
+        stat_date: string;
+      }>((from, to) =>
+        db
+          .from("trade_stats")
+          .select("item_id, mod_rank, median, stat_date")
+          .in("item_id", chunk)
+          .gt("mod_rank", 0)
+          .gte("stat_date", resaleCutoff)
+          .order("stat_date", { ascending: false })
+          .order("item_id", { ascending: true })
+          .range(from, to),
+      );
+      for (const s of maxRankStats) {
+        const itemInfo = primeItemMap.get(s.item_id);
+        if (!itemInfo || itemInfo.max_mod_rank === null) continue;
+        if (s.mod_rank !== itemInfo.max_mod_rank) continue;
+        if (!resaleMaxRankMap.has(s.item_id) && s.median > 0) {
+          resaleMaxRankMap.set(s.item_id, Number(s.median));
+        }
+      }
     }
   }
 
@@ -380,6 +411,7 @@ export async function getBaroVisits(): Promise<{ visits: BaroVisit[]; junkRate: 
       const primeItem = vi.item_id ? primeItemMap.get(vi.item_id) : null;
       const is_primed_mod = primeItem?.is_primed_mod ?? false;
       const resale_median = vi.item_id ? (resaleMap.get(vi.item_id) ?? null) : null;
+      const resale_median_max_rank = vi.item_id ? (resaleMaxRankMap.get(vi.item_id) ?? null) : null;
       const roi =
         is_primed_mod && resale_median !== null
           ? computeBaroRoi(resale_median, vi.ducat_cost, junkRate)
@@ -392,6 +424,8 @@ export async function getBaroVisits(): Promise<{ visits: BaroVisit[]; junkRate: 
         url_name: primeItem?.url_name ?? null,
         is_primed_mod,
         resale_median,
+        resale_median_max_rank,
+        max_mod_rank: primeItem?.max_mod_rank ?? null,
         roi,
       };
     });
@@ -541,6 +575,7 @@ export interface PrimedModStats {
   url_name: string;
   item_id: string;
   stats: { stat_date: string; median: number; volume: number }[];
+  vault_events: VaultEvent[];
 }
 
 export async function getPrimedModStats(): Promise<PrimedModStats[]> {
@@ -577,6 +612,26 @@ export async function getPrimedModStats(): Promise<PrimedModStats[]> {
     statsByMod.get(s.item_id)!.push(s);
   }
 
+  const allVaultEvents: { item_id: string; event: string; effective_date: string }[] = [];
+  for (let i = 0; i < modIds.length; i += CHUNK) {
+    const chunk = modIds.slice(i, i + CHUNK);
+    const { data: ve } = await db
+      .from("vault_events")
+      .select("item_id, event, effective_date")
+      .in("item_id", chunk)
+      .order("effective_date", { ascending: true });
+    if (ve) allVaultEvents.push(...(ve as typeof allVaultEvents));
+  }
+
+  const vaultByMod = new Map<string, VaultEvent[]>();
+  for (const v of allVaultEvents) {
+    if (!vaultByMod.has(v.item_id)) vaultByMod.set(v.item_id, []);
+    vaultByMod.get(v.item_id)!.push({
+      event: v.event as VaultEvent["event"],
+      effective_date: v.effective_date,
+    });
+  }
+
   return mods
     .map((m) => ({
       item_name: m.item_name,
@@ -587,6 +642,7 @@ export async function getPrimedModStats(): Promise<PrimedModStats[]> {
         median: Number(s.median),
         volume: Number(s.volume ?? 0),
       })),
+      vault_events: vaultByMod.get(m.id) ?? [],
     }))
     .filter((m) => m.stats.length > 0);
 }

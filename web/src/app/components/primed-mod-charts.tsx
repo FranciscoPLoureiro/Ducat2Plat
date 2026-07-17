@@ -53,6 +53,7 @@ export default function PrimedModCharts({
                   <ModChart
                     stats={mod.stats}
                     baroVisitDates={baroVisitDates}
+                    vaultEvents={mod.vault_events}
                   />
                 </Suspense>
               </div>

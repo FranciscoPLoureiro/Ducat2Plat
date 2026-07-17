@@ -1,7 +1,9 @@
+import type { Metadata } from "next";
 import { getBundles } from "@/lib/data";
 import BundlesTable from "../components/bundles-table";
 import StalenessBanner from "../components/staleness-banner";
 
+export const metadata: Metadata = { title: "Seller Bundles" };
 export const revalidate = 3600;
 
 export default async function BundlesPage() {
