@@ -3,6 +3,7 @@
 import { useState, useMemo } from "react";
 import type { AdvisorData, AdvisorModResult } from "@/lib/data";
 import { greedyBasketOptimize } from "@/lib/metrics";
+import { useWriteToken } from "@/lib/write-token";
 
 type SortKey =
   | "profitPerDucat"
@@ -20,7 +21,8 @@ interface BuyFormState {
   targetPrice: string;
 }
 
-export default function BaroAdvisor({ data, junkRate, writeToken }: { data: AdvisorData; junkRate: number; writeToken: string | null }) {
+export default function BaroAdvisor({ data, junkRate }: { data: AdvisorData; junkRate: number }) {
+  const writeToken = useWriteToken();
   const [sortKey, setSortKey] = useState<SortKey>("profitPerDucat");
   const [sortAsc, setSortAsc] = useState(false);
   const [expandedIdx, setExpandedIdx] = useState<number | null>(null);

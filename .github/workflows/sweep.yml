@@ -42,7 +42,7 @@ jobs:
           code=$?
           echo "exit_code=$code" >> "$GITHUB_OUTPUT"
           if [ "$code" -eq 2 ]; then
-            echo "::warning::Sweep completed with degraded results (>10% failures)"
+            echo "::warning::Sweep completed with warnings (quality violations or >10% item failures) — see log"
             exit 0
           fi
           exit $code
@@ -70,7 +70,7 @@ jobs:
           curl -sS -H "Content-Type: application/json" -d '{
             "embeds": [{
               "title": "⚠️ Degraded Sweep",
-              "description": "Sweep completed but with >10% item failures.\n\n**Workflow:** ${{ github.workflow }}\n**Run:** [View logs](${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }})",
+              "description": "Sweep completed with warnings — data-quality violations or >10% item failures. Check the run log for the exact reason.\n\n**Workflow:** ${{ github.workflow }}\n**Run:** [View logs](${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }})",
               "color": 16750848
             }]
           }' "$DISCORD_WEBHOOK_URL"

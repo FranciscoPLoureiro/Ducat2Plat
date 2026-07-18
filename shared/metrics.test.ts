@@ -679,7 +679,7 @@ describe("evaluateSellSignal", () => {
     acquiredAt: "2026-01-01T00:00:00Z",
     recoveryDays: 21,
     isRestocked: false,
-    lastAlertCondition: null,
+    alertedConditions: [],
     now: "2026-01-15T00:00:00Z",
   };
 
@@ -723,7 +723,7 @@ describe("evaluateSellSignal", () => {
     const result = evaluateSellSignal({
       ...base,
       currentMedian: 250,
-      lastAlertCondition: "target_hit",
+      alertedConditions: ["target_hit"],
     });
     expect(result).toBeNull();
   });
@@ -732,7 +732,7 @@ describe("evaluateSellSignal", () => {
     const result = evaluateSellSignal({
       ...base,
       isRestocked: true,
-      lastAlertCondition: "restocked",
+      alertedConditions: ["restocked"],
     });
     // restocked already alerted; check if target_hit or recovery fires
     expect(result).toBeNull();
@@ -742,7 +742,7 @@ describe("evaluateSellSignal", () => {
     const result = evaluateSellSignal({
       ...base,
       currentMedian: 250,
-      lastAlertCondition: "restocked",
+      alertedConditions: ["restocked"],
     });
     expect(result).toBe("target_hit");
   });

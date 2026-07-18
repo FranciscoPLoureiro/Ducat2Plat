@@ -43,11 +43,7 @@ export default async function BaroPage() {
           <h2 className="text-lg font-semibold mb-3 text-emerald-400">
             Hold Advisor
           </h2>
-          <BaroAdvisor
-            data={advisorData}
-            junkRate={junkRate}
-            writeToken={process.env.REVALIDATE_TOKEN ?? null}
-          />
+          <BaroAdvisor data={advisorData} junkRate={junkRate} />
         </section>
       )}
 

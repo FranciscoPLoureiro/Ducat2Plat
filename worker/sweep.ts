@@ -12,11 +12,17 @@ import {
   computePpdAtN,
   computeVelocity,
   computeJunkRateFromRanked,
+  computeBaseline,
+  buildRecoverySeries,
+  poolMedianCurve,
+  extractRecoveryDays,
   evaluateSellSignal,
   formatSellSignalMessage,
   VELOCITY_DAYS,
   VELOCITY_LIQUID,
   PPD_N,
+  MAX_RECOVERY_DAYS,
+  type DailyPrice,
   type SellSignalCondition,
   type SellSignalPosition,
 } from "../shared/metrics";
@@ -390,7 +396,11 @@ async function checkDataQuality(sweepId: number): Promise<string[]> {
     .select("url_name, ducats")
     .not("ducats", "is", null);
   const junkItems = (junkData ?? []) as { url_name: string; ducats: number }[];
-  const badDucats = junkItems.filter((i) => !VALID_DUCATS.has(i.ducats));
+  // Sets carry the summed ducat value of their parts, so the per-item tier
+  // check only applies to non-set items.
+  const badDucats = junkItems.filter(
+    (i) => !i.url_name.endsWith("_set") && !VALID_DUCATS.has(i.ducats),
+  );
   if (badDucats.length > 0) {
     const examples = badDucats
       .slice(0, 5)
@@ -750,13 +760,55 @@ async function postDiscord(content: string, title: string): Promise<void> {
 
 // ── Sell signals (M13) ─────────────────────────────────────────────
 
+// Recovery days for one mod from its own restock history: per-restock
+// normalized price series pooled into a median curve (same math as the /baro
+// advisor via shared/metrics). Falls back to MAX_RECOVERY_DAYS when the mod
+// has fewer than 3 restocks with price coverage — a conservative bound, never
+// a fabricated per-mod estimate.
+async function computeRecoveryDaysForItem(itemId: string): Promise<number> {
+  const priceCutoff = new Date(Date.now() - 400 * 86_400_000)
+    .toISOString()
+    .slice(0, 10);
+  const { data: statRows } = await db
+    .from("trade_stats")
+    .select("stat_date, median")
+    .eq("item_id", itemId)
+    .eq("mod_rank", 0)
+    .gte("stat_date", priceCutoff)
+    .order("stat_date", { ascending: true });
+
+  const prices: DailyPrice[] = ((statRows ?? []) as { stat_date: string; median: number }[])
+    .filter((r) => r.median > 0)
+    .map((r) => ({ date: r.stat_date, median: Number(r.median) }));
+  if (prices.length === 0) return MAX_RECOVERY_DAYS;
+
+  const { data: restocks } = await db
+    .from("baro_visit_items")
+    .select("visit_id, baro_visits!inner(arrival, departure)")
+    .eq("item_id", itemId);
+
+  const series = [];
+  for (const r of (restocks ?? []) as unknown as {
+    baro_visits: { arrival: string; departure: string };
+  }[]) {
+    const baseline = computeBaseline(prices, r.baro_visits.arrival);
+    if (baseline === null || baseline <= 0) continue;
+    const s = buildRecoverySeries(prices, r.baro_visits.departure, baseline);
+    if (s.length > 0) series.push(s);
+  }
+
+  if (series.length < 3) return MAX_RECOVERY_DAYS;
+  const curve = poolMedianCurve(series);
+  return extractRecoveryDays(curve) ?? MAX_RECOVERY_DAYS;
+}
+
 async function checkSellSignals(sweepId: number): Promise<void> {
   const { data: openPositions } = await db
     .from("positions")
     .select(`
       id, item_id, qty, cost_ducats, junk_rate_at_buy,
       baseline_at_buy, target_price, acquired_at,
-      last_alert_condition, last_alert_at,
+      last_alert_condition, last_alert_at, alerted_conditions,
       prime_items!inner(item_name, url_name)
     `)
     .eq("status", "open");
@@ -768,10 +820,15 @@ async function checkSellSignals(sweepId: number): Promise<void> {
 
   console.log(`Checking sell signals for ${openPositions.length} open positions`);
 
-  // Get current rank-0 medians for all position items
+  // Get current rank-0 medians for all position items. Window + small chunks
+  // keep every query well under PostgREST's silent 1000-row cap
+  // (25 items x 30 days = 750 rows max).
   const itemIds = Array.from(new Set(openPositions.map((p) => p.item_id as string)));
   const medianMap = new Map<string, number>();
-  const CHUNK = 200;
+  const medianCutoff = new Date(Date.now() - 30 * 86_400_000)
+    .toISOString()
+    .slice(0, 10);
+  const CHUNK = 25;
 
   for (let i = 0; i < itemIds.length; i += CHUNK) {
     const chunk = itemIds.slice(i, i + CHUNK);
@@ -780,7 +837,9 @@ async function checkSellSignals(sweepId: number): Promise<void> {
       .select("item_id, median")
       .in("item_id", chunk)
       .eq("mod_rank", 0)
-      .order("stat_date", { ascending: false });
+      .gte("stat_date", medianCutoff)
+      .order("stat_date", { ascending: false })
+      .order("item_id", { ascending: true });
 
     if (stats) {
       for (const s of stats as { item_id: string; median: number }[]) {
@@ -791,9 +850,12 @@ async function checkSellSignals(sweepId: number): Promise<void> {
     }
   }
 
-  // Check for restocked mods: items that appeared in a baro visit
-  // recorded during THIS sweep (newly recorded visit)
+  // Restock = the mod appears in a visit that ARRIVED AFTER the position was
+  // opened. Merely being in the currently-active visit is not a restock —
+  // buying during a visit is the normal flow, and flagging those would fire a
+  // false "restocked" alert on every position the day after purchase.
   const restockedItemIds = new Set<string>();
+  let latestVisitArrival: number | null = null;
   const { data: latestVisit } = await db
     .from("baro_visits")
     .select("id, arrival, departure")
@@ -808,6 +870,7 @@ async function checkSellSignals(sweepId: number): Promise<void> {
     const isActive = now >= arrival && now < departure;
 
     if (isActive) {
+      latestVisitArrival = arrival;
       const { data: visitItems } = await db
         .from("baro_visit_items")
         .select("item_id")
@@ -822,17 +885,19 @@ async function checkSellSignals(sweepId: number): Promise<void> {
     }
   }
 
-  // Get recovery_days from the sweep's rankings for each item
-  // (We use a simple heuristic: recovery_days from the pooled curve stored
-  //  in the advisor data. For simplicity in the worker, we estimate from
-  //  the baseline_at_buy and target_price.)
-  // Actually, we need to compute recovery_days. Let's fetch from the most
-  // recent advisor-style computation. For now, use a conservative default
-  // of 42 days (MAX_RECOVERY_DAYS) when we can't compute it.
+  // Per-mod recovery days from the mod's own restock history (Stage B,
+  // n >= 3 covered restocks); MAX_RECOVERY_DAYS as the conservative bound
+  // when the mod lacks history.
+  const recoveryDaysMap = new Map<string, number>();
+  for (const itemId of itemIds) {
+    recoveryDaysMap.set(itemId, await computeRecoveryDaysForItem(itemId));
+  }
+
   const masteryRank = parseInt(process.env.MASTERY_RANK ?? "30", 10);
   const nowStr = new Date().toISOString();
 
   const signaling: SellSignalPosition[] = [];
+  const alertedById = new Map<number, string[]>();
 
   for (const pos of openPositions) {
     const itemId = pos.item_id as string;
@@ -840,19 +905,27 @@ async function checkSellSignals(sweepId: number): Promise<void> {
     if (currentMedian === undefined) continue;
 
     const pi = pos.prime_items as unknown as { item_name: string; url_name: string };
-    const isRestocked = restockedItemIds.has(itemId);
+    const acquiredAt = pos.acquired_at as string;
+    const isRestocked =
+      restockedItemIds.has(itemId) &&
+      latestVisitArrival !== null &&
+      latestVisitArrival > new Date(acquiredAt).getTime();
 
     const signal = evaluateSellSignal({
       currentMedian,
       targetPrice: Number(pos.target_price),
-      acquiredAt: pos.acquired_at as string,
-      recoveryDays: 42,
+      acquiredAt,
+      recoveryDays: recoveryDaysMap.get(itemId) ?? MAX_RECOVERY_DAYS,
       isRestocked,
-      lastAlertCondition: pos.last_alert_condition as string | null,
+      alertedConditions: (pos.alerted_conditions as string[] | null) ?? [],
       now: nowStr,
     });
 
     if (signal) {
+      alertedById.set(
+        pos.id as number,
+        [...(((pos.alerted_conditions as string[] | null) ?? [])), signal],
+      );
       const costPlat = (pos.cost_ducats as number) * Number(pos.junk_rate_at_buy);
       signaling.push({
         id: pos.id as number,
@@ -885,6 +958,7 @@ async function checkSellSignals(sweepId: number): Promise<void> {
       .update({
         last_alert_condition: sig.signal,
         last_alert_at: nowStr,
+        alerted_conditions: alertedById.get(sig.id) ?? [sig.signal],
       })
       .eq("id", sig.id);
 

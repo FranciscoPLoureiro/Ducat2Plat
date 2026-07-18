@@ -2,16 +2,16 @@
 
 import { useState } from "react";
 import type { Position } from "@/lib/data";
+import { useWriteToken } from "@/lib/write-token";
 
 export default function PositionsTable({
   positions,
-  writeToken,
   showClose,
 }: {
   positions: Position[];
-  writeToken: string | null;
   showClose: boolean;
 }) {
+  const writeToken = useWriteToken();
   const [closingId, setClosingId] = useState<number | null>(null);
   const [closePrice, setClosePrice] = useState("");
   const [submitting, setSubmitting] = useState(false);

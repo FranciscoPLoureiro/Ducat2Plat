@@ -2,6 +2,7 @@ import type { Metadata } from "next";
 import { getPositions } from "@/lib/data";
 import PositionsTable from "../components/positions-table";
 import StalenessBanner from "../components/staleness-banner";
+import WriteTokenControl from "../components/write-token-control";
 
 export const metadata: Metadata = { title: "Positions" };
 export const revalidate = 3600;
@@ -11,8 +12,6 @@ export default async function PositionsPage() {
     getPositions("open"),
     getPositions("closed"),
   ]);
-
-  const writeToken = process.env.REVALIDATE_TOKEN ?? null;
 
   return (
     <div className="max-w-7xl mx-auto px-4 py-6">
@@ -24,13 +23,16 @@ export default async function PositionsPage() {
           Track your Primed mod purchases and mark-to-market P/L.
           Estimated values use the daily median — actual fills may differ.
         </p>
+        <div className="mt-3">
+          <WriteTokenControl />
+        </div>
       </header>
 
       <section className="mb-8">
         <h2 className="text-lg font-semibold mb-3 text-emerald-400">
           Open Positions ({openPositions.length})
         </h2>
-        <PositionsTable positions={openPositions} writeToken={writeToken} showClose />
+        <PositionsTable positions={openPositions} showClose />
       </section>
 
       {closedPositions.length > 0 && (
@@ -38,7 +40,7 @@ export default async function PositionsPage() {
           <h2 className="text-lg font-semibold mb-3 text-zinc-400">
             Closed Positions ({closedPositions.length})
           </h2>
-          <PositionsTable positions={closedPositions} writeToken={null} showClose={false} />
+          <PositionsTable positions={closedPositions} showClose={false} />
         </section>
       )}
     </div>
