@@ -398,3 +398,39 @@ After each task state what changed and how you verified it. Do not post to the
 real Discord webhook during testing — use a mock/env override and show me the
 rendered message content instead.
 ```
+
+---
+
+## Your prep (human) — before M14
+
+- [ ] None. All tasks are code-only against existing data.
+
+## Prompt — M14: Professional Polish
+
+```
+Read SPEC.md and ROADMAP.md in full before writing any code. Implement
+**Milestone M14 only** from ROADMAP.md, tasks in the order listed (1 → 8).
+Hard constraints: SPEC.md §1 non-goals and ROADMAP.md "do not build" still
+apply — no auth, no realtime, no prediction.
+
+Repo context:
+- shared/metrics.ts is the ONLY editable metrics source;
+  web/src/lib/metrics.ts is generated (npm run sync-shared in web/) and
+  guarded by a CI test. Never edit the web copy.
+- PostgREST caps queries at 1000 rows — bulk reads use the fetchAll helper in
+  web/src/lib/data.ts with deterministic ordering.
+- The write token lives in localStorage via web/src/lib/write-token.ts
+  (useSyncExternalStore). Follow the same pattern for M14.7's settings store —
+  and never render secrets or settings into server components.
+- ESLint forbids setState-in-effect; for localStorage state use lazy
+  initializers (collapsed-by-default UI) or useSyncExternalStore, matching
+  existing components.
+- web/AGENTS.md: read node_modules/next/dist/docs/ before touching Next APIs.
+- Worker changes (M14.2: store next Baro arrival from the warframestat
+  payload) must keep the sweep idempotent; add a migration only if you need a
+  column (a heartbeat column is fine).
+
+After each task state what changed and how you verified it. Run the full local
+suite (web: lint, tsc, vitest, next build; worker: tsc, vitest) before
+declaring done. UI tasks: verify at 375px width too.
+```

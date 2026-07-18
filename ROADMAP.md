@@ -265,6 +265,55 @@ P/L; the restock signal fires when a held mod is inserted into a new visit
 
 ---
 
+## M14 — Professional Polish (trust, context, and signal-to-noise)
+
+Findings from the 2026-07-19 full product walkthrough. Theme: the math is right
+but the tool doesn't tell the user how fresh, how confident, or how to read it.
+Ordered by value:
+
+1. **Data freshness, always visible.** Every page shows "Data: sweep #N, X h
+   ago" (small, in the nav or under the title) — not just the 36h staleness
+   banner. Actionable views (planner, bundles, ranking order lists) add one
+   line: "listings are up to a day old — confirm the seller is still in-game."
+   A pro tool never lets the user mistake stale for live.
+2. **Fix the Baro countdown.** It computes latest-arrival + 14d, which the
+   off-cadence TennoCon visit skews. The warframestat voidTrader endpoint
+   always returns the NEXT activation time even between visits — the worker
+   stores it (e.g. on heartbeat), the widget reads it. Show the date, not just
+   "7d": "Baro: Fri Jul 24 (5d)". Put the widget in the nav so every page has
+   it.
+3. **Explain the numbers.** Column-header tooltips (title attr is fine) for
+   PpD, PpD@6, Velocity, Score, Depth, ROI, verdicts; a collapsible "How to
+   read this" box per page (2–4 sentences each); advisor verdict glossary.
+   Zero new data — pure comprehension.
+4. **Bundles page polish**: 1-decimal PpD (missed in M10); per-seller
+   "Copy /w" whisper button (planner already has one — reuse); link seller
+   names to warframe.market/profile/<name>; default view top 50 by combined
+   PpD with a min-total-ducats filter (default 135) to cut the 2-item noise
+   tail.
+5. **Between-visits Baro page** (12 of 14 days it's just history+charts):
+   add a "Next visit prep" panel — next arrival date/time, ducat planner
+   link, and a recovery watchlist: each Primed mod's current price as % of
+   baseline ("Primed Reach 78% — still recovering from TennoCon flood; not
+   yet sell-priced"). Honest data, no prediction.
+6. **Visit history de-noising**: default filter to Primed mods + tradeables
+   (cosmetics toggle off); "Last Seen: Now" → actual label ("current visit"
+   while active, else the visit date).
+7. **Local settings** (localStorage, no backend): Mastery Rank (drives a
+   "this plan uses N of your ~MR daily trades" line in planner/bundles),
+   default min-velocity, default ducat target. Worker keeps its MASTERY_RANK
+   env for Discord.
+8. **Positions upgrades**: portfolio summary row (total cost / current /
+   unrealized P/L); edit target_price on an open position; Discord signal
+   messages link to /positions.
+
+✅ Acceptance: every page shows sweep age; countdown shows a date sourced from
+the API; each metric column has a tooltip; bundles have working whisper copy;
+/baro shows the prep panel when Baro is absent; planner shows the trade-cap
+line once MR is set.
+
+---
+
 ## Sequencing rationale
 
 M7 first because unreported failure invalidates everything else — a perfectly
