@@ -8,16 +8,17 @@ const PAGE_SIZE = 100;
 export default function BaroHistory({ items }: { items: BaroItemHistory[] }) {
   const [search, setSearch] = useState("");
   const [page, setPage] = useState(0);
+  const [hideCosmetics, setHideCosmetics] = useState(true);
 
-  const filtered = useMemo(
-    () =>
-      search
-        ? items.filter((i) =>
-            i.item_name.toLowerCase().includes(search.toLowerCase())
-          )
-        : items,
-    [items, search]
-  );
+  const filtered = useMemo(() => {
+    let result = hideCosmetics ? items.filter((i) => i.matched) : items;
+    if (search) {
+      result = result.filter((i) =>
+        i.item_name.toLowerCase().includes(search.toLowerCase()),
+      );
+    }
+    return result;
+  }, [items, search, hideCosmetics]);
 
   const totalPages = Math.ceil(filtered.length / PAGE_SIZE);
   const pageItems = filtered.slice(page * PAGE_SIZE, (page + 1) * PAGE_SIZE);
@@ -35,6 +36,21 @@ export default function BaroHistory({ items }: { items: BaroItemHistory[] }) {
           placeholder="Filter items..."
           className="w-full max-w-xs px-3 py-2 rounded bg-zinc-900 border border-zinc-700 text-sm text-zinc-200 placeholder-zinc-600 focus:outline-none focus:border-zinc-500"
         />
+        <label
+          className="flex items-center gap-1.5 text-sm text-zinc-400 cursor-pointer"
+          title="Cosmetics, glyphs and other items not tradeable on warframe.market"
+        >
+          <input
+            type="checkbox"
+            checked={hideCosmetics}
+            onChange={(e) => {
+              setHideCosmetics(e.target.checked);
+              setPage(0);
+            }}
+            className="accent-emerald-500"
+          />
+          Hide cosmetics
+        </label>
         {totalPages > 1 && (
           <div className="flex items-center gap-2 text-sm text-zinc-400">
             <button
@@ -62,10 +78,16 @@ export default function BaroHistory({ items }: { items: BaroItemHistory[] }) {
           <thead>
             <tr className="border-b border-zinc-700 text-zinc-400 text-left">
               <th className="py-2 px-3 font-medium">Item</th>
-              <th className="py-2 px-3 font-medium text-right">
-                Last Seen (visits ago)
+              <th
+                className="py-2 px-3 font-medium text-right"
+                title="Date when carried in the most recent recorded visit; otherwise, number of visits since last carried (hover for the date)"
+              >
+                Last Seen
               </th>
-              <th className="py-2 px-3 font-medium text-right">
+              <th
+                className="py-2 px-3 font-medium text-right"
+                title="Total recorded visits carrying this item (regular visits only — TennoCon excluded)"
+              >
                 Times Carried
               </th>
             </tr>
@@ -79,9 +101,21 @@ export default function BaroHistory({ items }: { items: BaroItemHistory[] }) {
                 <td className="py-2 px-3">{item.item_name}</td>
                 <td className="py-2 px-3 text-right">
                   {item.visits[0].visits_ago === 0 ? (
-                    <span className="text-emerald-400 font-semibold">Now</span>
+                    <span className="text-emerald-400 font-semibold">
+                      {new Date(item.visits[0].arrival).toLocaleDateString("en-US", {
+                        month: "short",
+                        day: "numeric",
+                      })}
+                    </span>
                   ) : (
-                    <span className="text-zinc-300">
+                    <span
+                      className="text-zinc-300"
+                      title={new Date(item.visits[0].arrival).toLocaleDateString("en-US", {
+                        year: "numeric",
+                        month: "short",
+                        day: "numeric",
+                      })}
+                    >
                       {item.visits[0].visits_ago}
                     </span>
                   )}

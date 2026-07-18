@@ -81,6 +81,49 @@ export async function getLatestSweepId(): Promise<number | null> {
 
 export async function getBaroCountdown(): Promise<BaroCountdown> {
   const db = getSupabase();
+
+  // The worker stores the API's own schedule on the heartbeat — ground truth
+  // for the next arrival, immune to off-cadence special visits.
+  const { data: hb } = await db
+    .from("heartbeat")
+    .select("baro_activation, baro_expiry, baro_active")
+    .eq("id", 1)
+    .single();
+
+  const now = Date.now();
+
+  if (hb?.baro_activation && hb?.baro_expiry) {
+    const arrival = new Date(hb.baro_activation).getTime();
+    const departure = new Date(hb.baro_expiry).getTime();
+
+    if (arrival <= now && now < departure) {
+      const { data: visit } = await db
+        .from("baro_visits")
+        .select("relay")
+        .order("arrival", { ascending: false })
+        .limit(1)
+        .single();
+      return {
+        daysUntil: 0,
+        active: true,
+        relay: visit?.relay ?? null,
+        arrival: hb.baro_activation,
+        departure: hb.baro_expiry,
+      };
+    }
+
+    if (arrival > now) {
+      return {
+        daysUntil: Math.max(0, Math.ceil((arrival - now) / 86_400_000)),
+        active: false,
+        relay: null,
+        arrival: hb.baro_activation,
+        departure: null,
+      };
+    }
+  }
+
+  // Fallback (no heartbeat schedule yet): derive from the last recorded visit.
   const { data: visits } = await db
     .from("baro_visits")
     .select("arrival, departure, relay")
@@ -90,7 +133,6 @@ export async function getBaroCountdown(): Promise<BaroCountdown> {
 
   if (!visits) return { daysUntil: null, active: false, relay: null, arrival: null, departure: null };
 
-  const now = Date.now();
   const arrival = new Date(visits.arrival).getTime();
   const departure = new Date(visits.departure).getTime();
 
@@ -462,6 +504,9 @@ export async function getBaroVisits(): Promise<{ visits: BaroVisit[]; junkRate: 
 
 export interface BaroItemHistory {
   item_name: string;
+  // True when the item matches a warframe.market item (tradeable); false for
+  // Baro-only cosmetics, which are noise for arbitrage purposes.
+  matched: boolean;
   visits: { arrival: string; visits_ago: number }[];
 }
 
@@ -480,11 +525,11 @@ export async function getBaroItemHistory(): Promise<BaroItemHistory[]> {
   if (!visits?.length) return [];
 
   const visitIds = visits.map((v) => v.id);
-  const allItems = await fetchAll<{ visit_id: number; item_name: string }>(
+  const allItems = await fetchAll<{ visit_id: number; item_name: string; item_id: string | null }>(
     (from, to) =>
       db
         .from("baro_visit_items")
-        .select("visit_id, item_name")
+        .select("visit_id, item_name, item_id")
         .in("visit_id", visitIds)
         .order("visit_id", { ascending: true })
         .order("item_name", { ascending: true })
@@ -497,6 +542,7 @@ export async function getBaroItemHistory(): Promise<BaroItemHistory[]> {
   visits.forEach((v, i) => visitIndexMap.set(v.id, i));
 
   const itemVisits = new Map<string, { arrival: string; visits_ago: number }[]>();
+  const itemMatched = new Map<string, boolean>();
   for (const vi of allItems) {
     const idx = visitIndexMap.get(vi.visit_id);
     if (idx === undefined) continue;
@@ -505,12 +551,13 @@ export async function getBaroItemHistory(): Promise<BaroItemHistory[]> {
       arrival: visits[idx].arrival,
       visits_ago: idx,
     });
+    if (vi.item_id !== null) itemMatched.set(vi.item_name, true);
   }
 
   const results: BaroItemHistory[] = [];
   for (const [item_name, v] of itemVisits) {
     v.sort((a, b) => a.visits_ago - b.visits_ago);
-    results.push({ item_name, visits: v });
+    results.push({ item_name, matched: itemMatched.get(item_name) ?? false, visits: v });
   }
   results.sort((a, b) => a.visits[0].visits_ago - b.visits[0].visits_ago);
   return results;

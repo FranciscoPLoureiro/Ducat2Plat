@@ -306,6 +306,7 @@ export interface SellSignalPosition {
 export function formatSellSignalMessage(
   positions: SellSignalPosition[],
   masteryRank: number,
+  siteUrl?: string,
 ): string {
   if (positions.length === 0) return "";
 
@@ -335,6 +336,11 @@ export function formatSellSignalMessage(
         `Est. P/L: ${sign}${Math.round(p.pnl)}p`,
       );
     }
+  }
+
+  if (siteUrl) {
+    lines.push("");
+    lines.push(`${siteUrl.replace(/\/$/, "")}/positions`);
   }
 
   return lines.join("\n");
