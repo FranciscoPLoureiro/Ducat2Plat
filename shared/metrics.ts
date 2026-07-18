@@ -256,6 +256,96 @@ export function computeAdvisorVerdict(
   return { verdict: "BUY & FLIP", profitPerDay: null, profitPerDucat };
 }
 
+// ── Sell Signals (M13) ─────────────────────────────────────────────
+
+export type SellSignalCondition = "target_hit" | "recovery_elapsed" | "restocked";
+
+export interface SellSignalInput {
+  currentMedian: number;
+  targetPrice: number;
+  acquiredAt: string;
+  recoveryDays: number | null;
+  isRestocked: boolean;
+  lastAlertCondition: string | null;
+  now: string;
+}
+
+export function evaluateSellSignal(input: SellSignalInput): SellSignalCondition | null {
+  const {
+    currentMedian, targetPrice, acquiredAt, recoveryDays,
+    isRestocked, lastAlertCondition, now,
+  } = input;
+
+  if (isRestocked && lastAlertCondition !== "restocked") return "restocked";
+
+  if (currentMedian >= targetPrice && lastAlertCondition !== "target_hit") return "target_hit";
+
+  if (recoveryDays !== null) {
+    const daysHeld = Math.floor(
+      (new Date(now).getTime() - new Date(acquiredAt).getTime()) / 86_400_000,
+    );
+    if (daysHeld >= recoveryDays && lastAlertCondition !== "recovery_elapsed") return "recovery_elapsed";
+  }
+
+  return null;
+}
+
+export interface SellSignalPosition {
+  id: number;
+  itemName: string;
+  qty: number;
+  costPlat: number;
+  currentMedian: number;
+  targetPrice: number;
+  signal: SellSignalCondition;
+  pnl: number;
+}
+
+export function formatSellSignalMessage(
+  positions: SellSignalPosition[],
+  masteryRank: number,
+): string {
+  if (positions.length === 0) return "";
+
+  positions.sort((a, b) => b.pnl - a.pnl);
+
+  const lines: string[] = [];
+
+  if (positions.length > 3) {
+    lines.push(`**${positions.length} positions signaling** (sorted by P/L):`);
+    lines.push("");
+    for (const p of positions) {
+      const sign = p.pnl >= 0 ? "+" : "";
+      lines.push(
+        `- **${p.itemName}** x${p.qty}: ${signalLabel(p.signal)} — ` +
+        `current ${Math.round(p.currentMedian)}p, target ${Math.round(p.targetPrice)}p, ` +
+        `est. P/L ${sign}${Math.round(p.pnl)}p`,
+      );
+    }
+    lines.push("");
+    lines.push(`Daily trade cap: ${masteryRank} trades (MR${masteryRank}). Prioritize by P/L.`);
+  } else {
+    for (const p of positions) {
+      const sign = p.pnl >= 0 ? "+" : "";
+      lines.push(
+        `**${p.itemName}** x${p.qty}: ${signalLabel(p.signal)}\n` +
+        `Current median: ${Math.round(p.currentMedian)}p | Target: ${Math.round(p.targetPrice)}p | ` +
+        `Est. P/L: ${sign}${Math.round(p.pnl)}p`,
+      );
+    }
+  }
+
+  return lines.join("\n");
+}
+
+function signalLabel(condition: SellSignalCondition): string {
+  switch (condition) {
+    case "target_hit": return "Target price reached";
+    case "recovery_elapsed": return "Recovery window elapsed";
+    case "restocked": return "Restocked by Baro — price will drop, sell now";
+  }
+}
+
 export function greedyBasketOptimize(
   items: BasketCandidate[],
   ducatWallet: number,

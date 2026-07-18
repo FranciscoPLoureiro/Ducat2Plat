@@ -658,6 +658,114 @@ export async function getPrimedModStats(): Promise<PrimedModStats[]> {
     .filter((m) => m.stats.length > 0);
 }
 
+// ── Positions (M13) ────────────────────────────────────────────────
+
+export interface Position {
+  id: number;
+  item_id: string;
+  item_name: string;
+  url_name: string;
+  qty: number;
+  cost_ducats: number;
+  cost_credits: number;
+  junk_rate_at_buy: number;
+  baseline_at_buy: number;
+  target_price: number;
+  acquired_at: string;
+  status: "open" | "closed";
+  closed_price: number | null;
+  closed_at: string | null;
+  current_median: number | null;
+  days_held: number;
+  unrealized_pnl: number | null;
+  realized_pnl: number | null;
+  distance_to_target: number | null;
+}
+
+export async function getPositions(status: "open" | "closed" = "open"): Promise<Position[]> {
+  const db = getSupabase();
+
+  const { data: rows } = await db
+    .from("positions")
+    .select(`
+      id, item_id, qty, cost_ducats, cost_credits,
+      junk_rate_at_buy, baseline_at_buy, target_price,
+      acquired_at, status, closed_price, closed_at,
+      prime_items!inner(item_name, url_name)
+    `)
+    .eq("status", status)
+    .order("acquired_at", { ascending: false });
+
+  if (!rows?.length) return [];
+
+  const itemIds = [...new Set(rows.map((r) => r.item_id as string))];
+  const medianMap = new Map<string, number>();
+  const CHUNK = 200;
+
+  for (let i = 0; i < itemIds.length; i += CHUNK) {
+    const chunk = itemIds.slice(i, i + CHUNK);
+    const { data: stats } = await db
+      .from("trade_stats")
+      .select("item_id, median")
+      .in("item_id", chunk)
+      .eq("mod_rank", 0)
+      .order("stat_date", { ascending: false });
+
+    if (stats) {
+      for (const s of stats as { item_id: string; median: number }[]) {
+        if (!medianMap.has(s.item_id) && s.median > 0) {
+          medianMap.set(s.item_id, Number(s.median));
+        }
+      }
+    }
+  }
+
+  const now = Date.now();
+
+  return rows.map((r) => {
+    const pi = r.prime_items as unknown as { item_name: string; url_name: string };
+    const currentMedian = medianMap.get(r.item_id as string) ?? null;
+    const costPlat = (r.cost_ducats as number) * Number(r.junk_rate_at_buy);
+    const daysHeld = Math.floor(
+      (now - new Date(r.acquired_at as string).getTime()) / 86_400_000,
+    );
+
+    let unrealizedPnl: number | null = null;
+    let distanceToTarget: number | null = null;
+    if (currentMedian !== null) {
+      unrealizedPnl = (currentMedian - costPlat) * (r.qty as number);
+      distanceToTarget = (r.target_price as number) - currentMedian;
+    }
+
+    let realizedPnl: number | null = null;
+    if (r.closed_price !== null) {
+      realizedPnl = (Number(r.closed_price) - costPlat) * (r.qty as number);
+    }
+
+    return {
+      id: r.id as number,
+      item_id: r.item_id as string,
+      item_name: pi.item_name,
+      url_name: pi.url_name,
+      qty: r.qty as number,
+      cost_ducats: r.cost_ducats as number,
+      cost_credits: r.cost_credits as number,
+      junk_rate_at_buy: Number(r.junk_rate_at_buy),
+      baseline_at_buy: Number(r.baseline_at_buy),
+      target_price: Number(r.target_price),
+      acquired_at: r.acquired_at as string,
+      status: r.status as "open" | "closed",
+      closed_price: r.closed_price !== null ? Number(r.closed_price) : null,
+      closed_at: r.closed_at as string | null,
+      current_median: currentMedian,
+      days_held: daysHeld,
+      unrealized_pnl: unrealizedPnl,
+      realized_pnl: realizedPnl,
+      distance_to_target: distanceToTarget,
+    };
+  });
+}
+
 // ── Baro Hold Advisor (M12) ─────────────────────────────────────────
 
 export type MaturityStage = "A" | "B" | "C";
