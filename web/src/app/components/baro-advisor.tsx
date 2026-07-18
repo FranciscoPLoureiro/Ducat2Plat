@@ -12,11 +12,22 @@ type SortKey =
   | "holdProfit"
   | "ducatCost";
 
-export default function BaroAdvisor({ data }: { data: AdvisorData }) {
+interface BuyFormState {
+  modIdx: number;
+  qty: string;
+  costDucats: string;
+  costCredits: string;
+  targetPrice: string;
+}
+
+export default function BaroAdvisor({ data, junkRate, writeToken }: { data: AdvisorData; junkRate: number; writeToken: string | null }) {
   const [sortKey, setSortKey] = useState<SortKey>("profitPerDucat");
   const [sortAsc, setSortAsc] = useState(false);
   const [expandedIdx, setExpandedIdx] = useState<number | null>(null);
   const [ducatWallet, setDucatWallet] = useState<string>("");
+  const [buyForm, setBuyForm] = useState<BuyFormState | null>(null);
+  const [buying, setBuying] = useState(false);
+  const [buyResult, setBuyResult] = useState<string | null>(null);
 
   const sorted = useMemo(() => {
     const arr = [...data.mods];
@@ -47,6 +58,55 @@ export default function BaroAdvisor({ data }: { data: AdvisorData }) {
     );
     return { selected, totalDucats, totalCredits, totalFlipProfit, totalHoldProfit };
   }, [data.mods, ducatWallet]);
+
+  function openBuyForm(mod: AdvisorModResult, idx: number) {
+    const defaultTarget = mod.baseline !== null
+      ? Math.round(mod.baseline * 0.95 * 100) / 100
+      : 0;
+    setBuyForm({
+      modIdx: idx,
+      qty: "1",
+      costDucats: String(mod.ducatCost),
+      costCredits: String(mod.creditCost),
+      targetPrice: String(defaultTarget),
+    });
+    setBuyResult(null);
+  }
+
+  async function submitBuy(mod: AdvisorModResult) {
+    if (!buyForm || !mod.itemId) return;
+    setBuying(true);
+    setBuyResult(null);
+    try {
+      const res = await fetch("/api/positions", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          "x-revalidate-token": writeToken ?? "",
+        },
+        body: JSON.stringify({
+          item_id: mod.itemId,
+          qty: parseInt(buyForm.qty, 10),
+          cost_ducats: parseInt(buyForm.costDucats, 10),
+          cost_credits: parseInt(buyForm.costCredits, 10),
+          junk_rate_at_buy: junkRate,
+          baseline_at_buy: mod.baseline ?? 0,
+          target_price: parseFloat(buyForm.targetPrice),
+        }),
+      });
+      if (res.ok) {
+        setBuyResult("Position recorded!");
+        setTimeout(() => { setBuyForm(null); setBuyResult(null); }, 1500);
+      } else {
+        const err = await res.json();
+        setBuyResult(`Error: ${err.error}`);
+      }
+    } catch {
+      setBuyResult("Network error");
+    } finally {
+      setBuying(false);
+    }
+  }
 
   function toggleSort(key: SortKey) {
     if (sortKey === key) setSortAsc(!sortAsc);
@@ -139,6 +199,7 @@ export default function BaroAdvisor({ data }: { data: AdvisorData }) {
           <tbody>
             {sorted.map((mod, i) => {
               const isInBasket = basket?.selected.includes(mod);
+              const isBuyRow = mod.verdict === "BUY & HOLD" || mod.verdict === "BUY & FLIP";
               return (
                 <ModRow
                   key={mod.itemName}
@@ -146,6 +207,15 @@ export default function BaroAdvisor({ data }: { data: AdvisorData }) {
                   expanded={expandedIdx === i}
                   onToggle={() => setExpandedIdx(expandedIdx === i ? null : i)}
                   highlighted={isInBasket === true}
+                  showBuyButton={isBuyRow && !!writeToken && !!mod.itemId}
+                  buyFormOpen={buyForm?.modIdx === i}
+                  buyForm={buyForm?.modIdx === i ? buyForm : null}
+                  onBuyClick={() => openBuyForm(mod, i)}
+                  onBuyFormChange={(f) => setBuyForm(f)}
+                  onBuySubmit={() => submitBuy(mod)}
+                  onBuyCancel={() => { setBuyForm(null); setBuyResult(null); }}
+                  buying={buying && buyForm?.modIdx === i}
+                  buyResult={buyForm?.modIdx === i ? buyResult : null}
                 />
               );
             })}
@@ -176,11 +246,29 @@ function ModRow({
   expanded,
   onToggle,
   highlighted,
+  showBuyButton,
+  buyFormOpen,
+  buyForm,
+  onBuyClick,
+  onBuyFormChange,
+  onBuySubmit,
+  onBuyCancel,
+  buying,
+  buyResult,
 }: {
   mod: AdvisorModResult;
   expanded: boolean;
   onToggle: () => void;
   highlighted: boolean;
+  showBuyButton: boolean;
+  buyFormOpen: boolean;
+  buyForm: BuyFormState | null;
+  onBuyClick: () => void;
+  onBuyFormChange: (f: BuyFormState) => void;
+  onBuySubmit: () => void;
+  onBuyCancel: () => void;
+  buying: boolean;
+  buyResult: string | null;
 }) {
   const verdictColor =
     mod.verdict === "BUY & HOLD"
@@ -224,6 +312,14 @@ function ModRow({
         </td>
         <td className={`py-2 px-3 font-semibold whitespace-nowrap ${verdictColor}`}>
           {mod.verdict}{holdLabel}
+          {showBuyButton && !buyFormOpen && (
+            <button
+              className="ml-2 px-2 py-0.5 text-xs rounded bg-emerald-800 hover:bg-emerald-700 text-emerald-200 font-normal"
+              onClick={(e) => { e.stopPropagation(); onBuyClick(); }}
+            >
+              I bought this
+            </button>
+          )}
         </td>
         <td className="py-2 px-3 text-right font-mono">
           {mod.profitPerDucat > 0 ? mod.profitPerDucat.toFixed(2) : "—"}
@@ -243,6 +339,68 @@ function ModRow({
           </span>
         </td>
       </tr>
+      {buyFormOpen && buyForm && (
+        <tr className="border-b border-zinc-800 bg-emerald-950/20">
+          <td colSpan={6} className="px-6 py-3">
+            <div className="flex flex-wrap items-end gap-3 text-sm">
+              <label className="text-zinc-400">
+                Qty
+                <input
+                  type="number" min="1" value={buyForm.qty}
+                  onChange={(e) => onBuyFormChange({ ...buyForm, qty: e.target.value })}
+                  className="ml-1 w-16 px-2 py-1 rounded bg-zinc-900 border border-zinc-700 text-zinc-200"
+                  onClick={(e) => e.stopPropagation()}
+                />
+              </label>
+              <label className="text-zinc-400">
+                Ducat cost
+                <input
+                  type="number" min="0" value={buyForm.costDucats}
+                  onChange={(e) => onBuyFormChange({ ...buyForm, costDucats: e.target.value })}
+                  className="ml-1 w-20 px-2 py-1 rounded bg-zinc-900 border border-zinc-700 text-zinc-200"
+                  onClick={(e) => e.stopPropagation()}
+                />
+              </label>
+              <label className="text-zinc-400">
+                Credits
+                <input
+                  type="number" min="0" value={buyForm.costCredits}
+                  onChange={(e) => onBuyFormChange({ ...buyForm, costCredits: e.target.value })}
+                  className="ml-1 w-24 px-2 py-1 rounded bg-zinc-900 border border-zinc-700 text-zinc-200"
+                  onClick={(e) => e.stopPropagation()}
+                />
+              </label>
+              <label className="text-zinc-400">
+                Target price
+                <input
+                  type="number" min="0" step="0.01" value={buyForm.targetPrice}
+                  onChange={(e) => onBuyFormChange({ ...buyForm, targetPrice: e.target.value })}
+                  className="ml-1 w-24 px-2 py-1 rounded bg-zinc-900 border border-zinc-700 text-zinc-200"
+                  onClick={(e) => e.stopPropagation()}
+                />
+              </label>
+              <button
+                className="px-3 py-1 rounded bg-emerald-700 hover:bg-emerald-600 text-emerald-100 text-sm disabled:opacity-50"
+                onClick={(e) => { e.stopPropagation(); onBuySubmit(); }}
+                disabled={buying}
+              >
+                {buying ? "Saving..." : "Record"}
+              </button>
+              <button
+                className="px-3 py-1 rounded bg-zinc-700 hover:bg-zinc-600 text-zinc-200 text-sm"
+                onClick={(e) => { e.stopPropagation(); onBuyCancel(); }}
+              >
+                Cancel
+              </button>
+              {buyResult && (
+                <span className={`text-sm ${buyResult.startsWith("Error") ? "text-red-400" : "text-emerald-400"}`}>
+                  {buyResult}
+                </span>
+              )}
+            </div>
+          </td>
+        </tr>
+      )}
       {expanded && <ExpandedDetails mod={mod} />}
     </>
   );

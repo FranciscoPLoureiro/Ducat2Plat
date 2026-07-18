@@ -38,6 +38,9 @@ export default function RootLayout({
             <Link href="/baro" className="text-zinc-400 hover:text-zinc-100 transition-colors">
               Baro
             </Link>
+            <Link href="/positions" className="text-zinc-400 hover:text-zinc-100 transition-colors">
+              Positions
+            </Link>
           </div>
         </nav>
         <main className="flex-1">{children}</main>

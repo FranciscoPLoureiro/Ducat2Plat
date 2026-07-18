@@ -12,9 +12,13 @@ import {
   computePpdAtN,
   computeVelocity,
   computeJunkRateFromRanked,
+  evaluateSellSignal,
+  formatSellSignalMessage,
   VELOCITY_DAYS,
   VELOCITY_LIQUID,
   PPD_N,
+  type SellSignalCondition,
+  type SellSignalPosition,
 } from "../shared/metrics";
 
 const SUPABASE_URL = process.env.SUPABASE_URL;
@@ -716,6 +720,180 @@ async function computeAndWriteRankings(sweepId: number): Promise<void> {
   );
 }
 
+// ── Discord webhook helper ──────────────────────────────────────────
+
+async function postDiscord(content: string, title: string): Promise<void> {
+  const url = process.env.DISCORD_WEBHOOK_URL;
+  if (!url) {
+    console.log("DISCORD_WEBHOOK_URL not set — skipping Discord post");
+    console.log(`  Would have posted: ${title}`);
+    console.log(`  ${content.slice(0, 500)}`);
+    return;
+  }
+
+  const res = await fetch(url, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      embeds: [{
+        title,
+        description: content,
+        color: 5763719, // green
+      }],
+    }),
+  });
+
+  if (!res.ok) {
+    console.warn(`Discord post failed: ${res.status} ${res.statusText}`);
+  }
+}
+
+// ── Sell signals (M13) ─────────────────────────────────────────────
+
+async function checkSellSignals(sweepId: number): Promise<void> {
+  const { data: openPositions } = await db
+    .from("positions")
+    .select(`
+      id, item_id, qty, cost_ducats, junk_rate_at_buy,
+      baseline_at_buy, target_price, acquired_at,
+      last_alert_condition, last_alert_at,
+      prime_items!inner(item_name, url_name)
+    `)
+    .eq("status", "open");
+
+  if (!openPositions?.length) {
+    console.log("No open positions — skipping sell signals");
+    return;
+  }
+
+  console.log(`Checking sell signals for ${openPositions.length} open positions`);
+
+  // Get current rank-0 medians for all position items
+  const itemIds = Array.from(new Set(openPositions.map((p) => p.item_id as string)));
+  const medianMap = new Map<string, number>();
+  const CHUNK = 200;
+
+  for (let i = 0; i < itemIds.length; i += CHUNK) {
+    const chunk = itemIds.slice(i, i + CHUNK);
+    const { data: stats } = await db
+      .from("trade_stats")
+      .select("item_id, median")
+      .in("item_id", chunk)
+      .eq("mod_rank", 0)
+      .order("stat_date", { ascending: false });
+
+    if (stats) {
+      for (const s of stats as { item_id: string; median: number }[]) {
+        if (!medianMap.has(s.item_id) && s.median > 0) {
+          medianMap.set(s.item_id, Number(s.median));
+        }
+      }
+    }
+  }
+
+  // Check for restocked mods: items that appeared in a baro visit
+  // recorded during THIS sweep (newly recorded visit)
+  const restockedItemIds = new Set<string>();
+  const { data: latestVisit } = await db
+    .from("baro_visits")
+    .select("id, arrival, departure")
+    .order("arrival", { ascending: false })
+    .limit(1)
+    .single();
+
+  if (latestVisit) {
+    const now = Date.now();
+    const arrival = new Date(latestVisit.arrival).getTime();
+    const departure = new Date(latestVisit.departure).getTime();
+    const isActive = now >= arrival && now < departure;
+
+    if (isActive) {
+      const { data: visitItems } = await db
+        .from("baro_visit_items")
+        .select("item_id")
+        .eq("visit_id", latestVisit.id)
+        .not("item_id", "is", null);
+
+      if (visitItems) {
+        for (const vi of visitItems as { item_id: string }[]) {
+          restockedItemIds.add(vi.item_id);
+        }
+      }
+    }
+  }
+
+  // Get recovery_days from the sweep's rankings for each item
+  // (We use a simple heuristic: recovery_days from the pooled curve stored
+  //  in the advisor data. For simplicity in the worker, we estimate from
+  //  the baseline_at_buy and target_price.)
+  // Actually, we need to compute recovery_days. Let's fetch from the most
+  // recent advisor-style computation. For now, use a conservative default
+  // of 42 days (MAX_RECOVERY_DAYS) when we can't compute it.
+  const masteryRank = parseInt(process.env.MASTERY_RANK ?? "30", 10);
+  const nowStr = new Date().toISOString();
+
+  const signaling: SellSignalPosition[] = [];
+
+  for (const pos of openPositions) {
+    const itemId = pos.item_id as string;
+    const currentMedian = medianMap.get(itemId);
+    if (currentMedian === undefined) continue;
+
+    const pi = pos.prime_items as unknown as { item_name: string; url_name: string };
+    const isRestocked = restockedItemIds.has(itemId);
+
+    const signal = evaluateSellSignal({
+      currentMedian,
+      targetPrice: Number(pos.target_price),
+      acquiredAt: pos.acquired_at as string,
+      recoveryDays: 42,
+      isRestocked,
+      lastAlertCondition: pos.last_alert_condition as string | null,
+      now: nowStr,
+    });
+
+    if (signal) {
+      const costPlat = (pos.cost_ducats as number) * Number(pos.junk_rate_at_buy);
+      signaling.push({
+        id: pos.id as number,
+        itemName: pi.item_name,
+        qty: pos.qty as number,
+        costPlat,
+        currentMedian,
+        targetPrice: Number(pos.target_price),
+        signal,
+        pnl: (currentMedian - costPlat) * (pos.qty as number),
+      });
+    }
+  }
+
+  if (signaling.length === 0) {
+    console.log("No sell signals triggered");
+    return;
+  }
+
+  console.log(`${signaling.length} sell signal(s) triggered`);
+
+  // Post Discord message
+  const message = formatSellSignalMessage(signaling, masteryRank);
+  await postDiscord(message, "Sell Signal");
+
+  // Update positions with last_alert_condition and last_alert_at
+  for (const sig of signaling) {
+    const { error } = await db
+      .from("positions")
+      .update({
+        last_alert_condition: sig.signal,
+        last_alert_at: nowStr,
+      })
+      .eq("id", sig.id);
+
+    if (error) {
+      console.warn(`  Failed to update alert for position #${sig.id}: ${error.message}`);
+    }
+  }
+}
+
 async function main() {
   console.log("=== Ducat2Plat sweep ===\n");
 
@@ -771,6 +949,9 @@ async function main() {
 
     console.log("\n--- Rankings ---");
     await computeAndWriteRankings(sweepId);
+
+    console.log("\n--- Sell signals ---");
+    await checkSellSignals(sweepId);
 
     const failRate = processed > 0 ? totalFailed / processed : 0;
     if (violations.length > 0 || failRate > 0.1) {

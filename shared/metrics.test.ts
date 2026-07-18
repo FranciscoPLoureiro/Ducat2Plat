@@ -16,6 +16,8 @@ import {
   isInTennoConWindow,
   computeAdvisorVerdict,
   greedyBasketOptimize,
+  evaluateSellSignal,
+  formatSellSignalMessage,
   RECOVERY_THRESHOLD,
 } from "./metrics";
 
@@ -665,5 +667,159 @@ describe("greedyBasketOptimize", () => {
     // 0 doesn't fit, take 1, take 2
     const result = greedyBasketOptimize(items, 200);
     expect(result).toEqual([1, 2]);
+  });
+});
+
+// ---------- evaluateSellSignal ----------
+
+describe("evaluateSellSignal", () => {
+  const base = {
+    currentMedian: 100,
+    targetPrice: 200,
+    acquiredAt: "2026-01-01T00:00:00Z",
+    recoveryDays: 21,
+    isRestocked: false,
+    lastAlertCondition: null,
+    now: "2026-01-15T00:00:00Z",
+  };
+
+  it("returns null when no conditions are met", () => {
+    expect(evaluateSellSignal(base)).toBeNull();
+  });
+
+  it("returns 'target_hit' when current median >= target", () => {
+    const result = evaluateSellSignal({ ...base, currentMedian: 200 });
+    expect(result).toBe("target_hit");
+  });
+
+  it("returns 'target_hit' when current median exceeds target", () => {
+    const result = evaluateSellSignal({ ...base, currentMedian: 250 });
+    expect(result).toBe("target_hit");
+  });
+
+  it("returns 'recovery_elapsed' when days held >= recovery_days", () => {
+    const result = evaluateSellSignal({
+      ...base,
+      now: "2026-01-22T00:00:00Z", // 21 days after acquiredAt
+    });
+    expect(result).toBe("recovery_elapsed");
+  });
+
+  it("returns 'restocked' when mod is restocked", () => {
+    const result = evaluateSellSignal({ ...base, isRestocked: true });
+    expect(result).toBe("restocked");
+  });
+
+  it("restocked takes priority over target_hit", () => {
+    const result = evaluateSellSignal({
+      ...base,
+      currentMedian: 250,
+      isRestocked: true,
+    });
+    expect(result).toBe("restocked");
+  });
+
+  it("does not re-alert same condition (target_hit)", () => {
+    const result = evaluateSellSignal({
+      ...base,
+      currentMedian: 250,
+      lastAlertCondition: "target_hit",
+    });
+    expect(result).toBeNull();
+  });
+
+  it("does not re-alert same condition (restocked)", () => {
+    const result = evaluateSellSignal({
+      ...base,
+      isRestocked: true,
+      lastAlertCondition: "restocked",
+    });
+    // restocked already alerted; check if target_hit or recovery fires
+    expect(result).toBeNull();
+  });
+
+  it("alerts different condition after previous alert", () => {
+    const result = evaluateSellSignal({
+      ...base,
+      currentMedian: 250,
+      lastAlertCondition: "restocked",
+    });
+    expect(result).toBe("target_hit");
+  });
+
+  it("returns null when recovery_days is null and only time condition would trigger", () => {
+    const result = evaluateSellSignal({
+      ...base,
+      recoveryDays: null,
+      now: "2026-06-01T00:00:00Z",
+    });
+    expect(result).toBeNull();
+  });
+});
+
+// ---------- formatSellSignalMessage ----------
+
+describe("formatSellSignalMessage", () => {
+  it("returns empty string for empty positions", () => {
+    expect(formatSellSignalMessage([], 30)).toBe("");
+  });
+
+  it("formats single position message", () => {
+    const msg = formatSellSignalMessage([{
+      id: 1,
+      itemName: "Primed Flow",
+      qty: 1,
+      costPlat: 30,
+      currentMedian: 250,
+      targetPrice: 200,
+      signal: "target_hit",
+      pnl: 220,
+    }], 30);
+    expect(msg).toContain("Primed Flow");
+    expect(msg).toContain("Target price reached");
+    expect(msg).toContain("+220p");
+  });
+
+  it("formats restocked signal with descriptive reason", () => {
+    const msg = formatSellSignalMessage([{
+      id: 1,
+      itemName: "Primed Mod",
+      qty: 1,
+      costPlat: 30,
+      currentMedian: 180,
+      targetPrice: 200,
+      signal: "restocked",
+      pnl: 150,
+    }], 30);
+    expect(msg).toContain("Restocked by Baro");
+    expect(msg).toContain("sell now");
+  });
+
+  it("includes trade cap when >3 positions signal", () => {
+    const positions = Array.from({ length: 4 }, (_, i) => ({
+      id: i + 1,
+      itemName: `Primed Mod ${i + 1}`,
+      qty: 1,
+      costPlat: 30,
+      currentMedian: 250,
+      targetPrice: 200,
+      signal: "target_hit" as const,
+      pnl: 200 - i * 10,
+    }));
+    const msg = formatSellSignalMessage(positions, 15);
+    expect(msg).toContain("4 positions signaling");
+    expect(msg).toContain("MR15");
+    expect(msg).toContain("15 trades");
+  });
+
+  it("sorts by P/L descending", () => {
+    const positions = [
+      { id: 1, itemName: "Low PnL", qty: 1, costPlat: 30, currentMedian: 100, targetPrice: 80, signal: "target_hit" as const, pnl: 50 },
+      { id: 2, itemName: "High PnL", qty: 1, costPlat: 30, currentMedian: 300, targetPrice: 200, signal: "target_hit" as const, pnl: 250 },
+    ];
+    const msg = formatSellSignalMessage(positions, 30);
+    const highIdx = msg.indexOf("High PnL");
+    const lowIdx = msg.indexOf("Low PnL");
+    expect(highIdx).toBeLessThan(lowIdx);
   });
 });
