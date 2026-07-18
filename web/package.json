@@ -7,7 +7,9 @@
     "build": "next build",
     "start": "next start",
     "lint": "eslint",
-    "test": "vitest run"
+    "test": "vitest run",
+    "sync-shared": "node scripts/sync-shared-metrics.mjs",
+    "prebuild": "node scripts/sync-shared-metrics.mjs"
   },
   "dependencies": {
     "@supabase/supabase-js": "^2.110.6",
