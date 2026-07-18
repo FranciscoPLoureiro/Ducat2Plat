@@ -1,6 +1,7 @@
 import type { Metadata } from "next";
 import { Geist_Mono } from "next/font/google";
 import Link from "next/link";
+import NavStatus from "./components/nav-status";
 import "./globals.css";
 
 const geistMono = Geist_Mono({
@@ -41,6 +42,7 @@ export default function RootLayout({
             <Link href="/positions" className="text-zinc-400 hover:text-zinc-100 transition-colors">
               Positions
             </Link>
+            <NavStatus />
           </div>
         </nav>
         <main className="flex-1">{children}</main>

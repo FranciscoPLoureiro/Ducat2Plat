@@ -2,6 +2,7 @@
 
 import { useState, useMemo, useCallback } from "react";
 import type { RankedItem } from "@/lib/data";
+import { useSettings, updateSettings } from "@/lib/settings";
 
 const LS_KEY_HAVE = "d2p_ducats_have";
 const LS_KEY_NEED = "d2p_ducats_need";
@@ -136,6 +137,7 @@ export default function DucatPlanner({ items }: { items: RankedItem[] }) {
   const [ducatsHave, setDucatsHave] = useState(() => readStoredNumber(LS_KEY_HAVE));
   const [ducatsNeed, setDucatsNeed] = useState(() => readStoredNumber(LS_KEY_NEED));
   const [copied, setCopied] = useState<string | null>(null);
+  const settings = useSettings();
 
   const updateHave = useCallback((v: number) => {
     setDucatsHave(v);
@@ -208,6 +210,20 @@ export default function DucatPlanner({ items }: { items: RankedItem[] }) {
                 placeholder="0"
               />
             </label>
+            <label className="text-sm text-zinc-400">
+              <span className="block mb-1" title="Your daily trade count equals your Mastery Rank">Mastery Rank</span>
+              <input
+                type="number"
+                value={settings.masteryRank ?? ""}
+                onChange={(e) =>
+                  updateSettings({ masteryRank: Number(e.target.value) || null })
+                }
+                min={0}
+                max={40}
+                className="w-20 px-3 py-1.5 rounded bg-zinc-900 border border-zinc-700 text-sm text-zinc-200 focus:outline-none focus:border-zinc-500"
+                placeholder="MR"
+              />
+            </label>
             <div className="text-sm">
               {shortfall > 0 ? (
                 <span className="text-amber-400">Shortfall: {shortfall} ducats</span>
@@ -230,6 +246,11 @@ export default function DucatPlanner({ items }: { items: RankedItem[] }) {
                   ({purchases.length} purchase{purchases.length !== 1 ? "s" : ""} from{" "}
                   {sellerGroups.length} seller{sellerGroups.length !== 1 ? "s" : ""})
                 </span>
+                {settings.masteryRank !== null && (
+                  <span className="text-zinc-500">
+                    ≈ {sellerGroups.length} of your ~{settings.masteryRank} daily trades
+                  </span>
+                )}
               </div>
 
               <div className="space-y-3">

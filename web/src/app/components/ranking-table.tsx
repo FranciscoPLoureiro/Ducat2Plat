@@ -3,13 +3,18 @@
 import { useState, useMemo } from "react";
 import Link from "next/link";
 import type { RankedItem } from "@/lib/data";
+import { useSettings, updateSettings } from "@/lib/settings";
 
 export default function RankingTable({ items }: { items: RankedItem[] }) {
   const [expanded, setExpanded] = useState<Set<string>>(new Set());
   const [showAll, setShowAll] = useState(false);
   const [search, setSearch] = useState("");
   const [hideSets, setHideSets] = useState(true);
-  const [minVelocity, setMinVelocity] = useState(5);
+  const settings = useSettings();
+  // Local edits win over the stored default; edits also persist as the new
+  // default. Server render always uses 5 (settings are client-only).
+  const [minVelOverride, setMinVelOverride] = useState<number | null>(null);
+  const minVelocity = minVelOverride ?? settings.minVelocity ?? 5;
 
   function toggle(id: string) {
     setExpanded((prev) => {
@@ -62,7 +67,11 @@ export default function RankingTable({ items }: { items: RankedItem[] }) {
           <input
             type="number"
             value={minVelocity}
-            onChange={(e) => setMinVelocity(Number(e.target.value) || 0)}
+            onChange={(e) => {
+              const v = Number(e.target.value) || 0;
+              setMinVelOverride(v);
+              updateSettings({ minVelocity: v });
+            }}
             min={0}
             className="w-16 px-2 py-1 rounded bg-zinc-900 border border-zinc-700 text-sm text-zinc-200 focus:outline-none focus:border-zinc-500"
           />
@@ -84,13 +93,13 @@ export default function RankingTable({ items }: { items: RankedItem[] }) {
             <tr className="border-b border-zinc-700 text-zinc-400 text-left">
               <th className="py-2 px-3 font-medium">#</th>
               <th className="py-2 px-3 font-medium">Item</th>
-              <th className="py-2 px-3 font-medium text-right">Ducats</th>
-              <th className="py-2 px-3 font-medium text-right">Median</th>
-              <th className="py-2 px-3 font-medium text-right">PpD</th>
-              <th className="py-2 px-3 font-medium text-right">PpD@6</th>
-              <th className="py-2 px-3 font-medium text-right">Velocity</th>
-              <th className="py-2 px-3 font-medium text-right">Score</th>
-              <th className="py-2 px-3 font-medium text-center">Depth</th>
+              <th className="py-2 px-3 font-medium text-right" title="Ducat value when sold to Baro's kiosk — a fixed game constant">Ducats</th>
+              <th className="py-2 px-3 font-medium text-right" title="Median closed-trade price (yesterday) — what it actually sells for, not what's listed">Median</th>
+              <th className="py-2 px-3 font-medium text-right" title="Ducats per plat at the median price — the naive rate">PpD</th>
+              <th className="py-2 px-3 font-medium text-right" title="Ducats per plat when actually buying 6 units from live in-game listings — the honest rate">PpD@6</th>
+              <th className="py-2 px-3 font-medium text-right" title="Real units sold per day over the last 14 days — liquidity">Velocity</th>
+              <th className="py-2 px-3 font-medium text-right" title="PpD@6 down-weighted for illiquidity — the ranking metric">Score</th>
+              <th className="py-2 px-3 font-medium text-center" title="OK: 6+ units available from in-game sellers. SHALLOW: fewer — the rate is based on less depth">Depth</th>
             </tr>
           </thead>
           <tbody>

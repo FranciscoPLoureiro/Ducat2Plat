@@ -14,8 +14,31 @@ export default function PositionsTable({
   const writeToken = useWriteToken();
   const [closingId, setClosingId] = useState<number | null>(null);
   const [closePrice, setClosePrice] = useState("");
+  const [editingId, setEditingId] = useState<number | null>(null);
+  const [editTarget, setEditTarget] = useState("");
   const [submitting, setSubmitting] = useState(false);
   const [result, setResult] = useState<string | null>(null);
+
+  async function handleTargetSave(id: number) {
+    if (!writeToken || !editTarget) return;
+    setSubmitting(true);
+    try {
+      const res = await fetch(`/api/positions/${id}`, {
+        method: "PATCH",
+        headers: {
+          "Content-Type": "application/json",
+          "x-revalidate-token": writeToken,
+        },
+        body: JSON.stringify({ target_price: parseFloat(editTarget) }),
+      });
+      if (res.ok) window.location.reload();
+      else setResult("Error updating target");
+    } catch {
+      setResult("Network error");
+    } finally {
+      setSubmitting(false);
+    }
+  }
 
   async function handleClose(id: number) {
     if (!writeToken || !closePrice) return;
@@ -61,12 +84,12 @@ export default function PositionsTable({
           <tr className="border-b border-zinc-700 text-zinc-400 text-left">
             <th className="py-2 px-3 font-medium">Mod</th>
             <th className="py-2 px-3 font-medium text-right">Qty</th>
-            <th className="py-2 px-3 font-medium text-right">Cost (ducats)</th>
-            <th className="py-2 px-3 font-medium text-right">Cost (plat est.)</th>
-            <th className="py-2 px-3 font-medium text-right">Current</th>
-            <th className="py-2 px-3 font-medium text-right">Target</th>
-            <th className="py-2 px-3 font-medium text-right">Distance</th>
-            <th className="py-2 px-3 font-medium text-right">Days</th>
+            <th className="py-2 px-3 font-medium text-right" title="Ducats paid at Baro, per unit">Cost (ducats)</th>
+            <th className="py-2 px-3 font-medium text-right" title="Ducats × the junk rate at purchase time — what those ducats effectively cost in plat">Cost (plat est.)</th>
+            <th className="py-2 px-3 font-medium text-right" title="Latest daily rank-0 median (open) or your recorded sale price (closed)">Current</th>
+            <th className="py-2 px-3 font-medium text-right" title="Sell alert fires when the median reaches this — click to edit">Target</th>
+            <th className="py-2 px-3 font-medium text-right" title="Current median minus target — positive means the target is reached">Distance</th>
+            <th className="py-2 px-3 font-medium text-right" title="Days since purchase">Days</th>
             <th className="py-2 px-3 font-medium text-right">
               {showClose ? "P/L (est.)" : "Realized P/L"}
             </th>
@@ -94,7 +117,45 @@ export default function PositionsTable({
                     ? (p.current_median !== null ? `${Math.round(p.current_median)}p` : "—")
                     : (p.closed_price !== null ? `${Math.round(p.closed_price)}p` : "—")}
                 </td>
-                <td className="py-2 px-3 text-right font-mono">{Math.round(p.target_price)}p</td>
+                <td className="py-2 px-3 text-right font-mono">
+                  {showClose && writeToken && editingId === p.id ? (
+                    <span className="inline-flex items-center gap-1">
+                      <input
+                        type="number"
+                        min="0"
+                        value={editTarget}
+                        onChange={(e) => setEditTarget(e.target.value)}
+                        className="w-16 px-1 py-0.5 text-xs rounded bg-zinc-900 border border-zinc-700 text-zinc-200"
+                      />
+                      <button
+                        className="px-1.5 py-0.5 text-xs rounded bg-emerald-800 hover:bg-emerald-700 text-emerald-200 disabled:opacity-50"
+                        onClick={() => handleTargetSave(p.id)}
+                        disabled={submitting || !editTarget}
+                      >
+                        ✓
+                      </button>
+                      <button
+                        className="px-1.5 py-0.5 text-xs rounded bg-zinc-700 text-zinc-300"
+                        onClick={() => setEditingId(null)}
+                      >
+                        ✕
+                      </button>
+                    </span>
+                  ) : (
+                    <span
+                      className={showClose && writeToken ? "cursor-pointer hover:text-emerald-400" : ""}
+                      title={showClose && writeToken ? "Click to edit target" : undefined}
+                      onClick={() => {
+                        if (showClose && writeToken) {
+                          setEditingId(p.id);
+                          setEditTarget(String(p.target_price));
+                        }
+                      }}
+                    >
+                      {Math.round(p.target_price)}p
+                    </span>
+                  )}
+                </td>
                 <td className="py-2 px-3 text-right font-mono">
                   {p.distance_to_target !== null && showClose
                     ? `${p.distance_to_target >= 0 ? "+" : ""}${Math.round(p.distance_to_target)}p`
@@ -153,6 +214,47 @@ export default function PositionsTable({
             );
           })}
         </tbody>
+        {positions.length > 1 && (
+          <tfoot>
+            <tr className="border-t border-zinc-700 text-zinc-300 font-semibold">
+              <td className="py-2 px-3">Total ({positions.length})</td>
+              <td className="py-2 px-3 text-right">
+                {positions.reduce((s, p) => s + p.qty, 0)}
+              </td>
+              <td className="py-2 px-3 text-right text-amber-400">
+                {positions.reduce((s, p) => s + p.cost_ducats * p.qty, 0)}
+              </td>
+              <td className="py-2 px-3 text-right font-mono text-zinc-400">
+                {Math.round(
+                  positions.reduce((s, p) => s + p.cost_ducats * p.junk_rate_at_buy * p.qty, 0),
+                )}p
+              </td>
+              <td className="py-2 px-3 text-right font-mono">
+                {showClose
+                  ? `${Math.round(
+                      positions.reduce((s, p) => s + (p.current_median ?? 0) * p.qty, 0),
+                    )}p`
+                  : "—"}
+              </td>
+              <td colSpan={3} />
+              <td className="py-2 px-3 text-right font-mono">
+                {(() => {
+                  const total = positions.reduce(
+                    (s, p) => s + ((showClose ? p.unrealized_pnl : p.realized_pnl) ?? 0),
+                    0,
+                  );
+                  return (
+                    <span className={total >= 0 ? "text-emerald-400" : "text-red-400"}>
+                      {total >= 0 ? "+" : ""}
+                      {Math.round(total)}p
+                    </span>
+                  );
+                })()}
+              </td>
+              {showClose && writeToken && <td />}
+            </tr>
+          </tfoot>
+        )}
       </table>
     </div>
   );

@@ -3,6 +3,7 @@ import { getPositions } from "@/lib/data";
 import PositionsTable from "../components/positions-table";
 import StalenessBanner from "../components/staleness-banner";
 import WriteTokenControl from "../components/write-token-control";
+import HelpBox from "../components/help-box";
 
 export const metadata: Metadata = { title: "Positions" };
 export const revalidate = 3600;
@@ -27,6 +28,20 @@ export default async function PositionsPage() {
           <WriteTokenControl />
         </div>
       </header>
+
+      <HelpBox>
+        <p>
+          Positions record what you bought from Baro and at what effective plat cost
+          (ducats × the junk rate at purchase time — snapshotted, so it never drifts).
+          The daily sweep checks each open position and posts a Discord alert when the
+          target is hit, the typical recovery window has elapsed, or Baro restocks the mod.
+        </p>
+        <p>
+          Click a <strong className="text-zinc-300">Target</strong> value to edit it.{" "}
+          <strong className="text-zinc-300">Close</strong> records your actual sale price
+          into realized P/L. Estimates use daily medians — your fills will differ.
+        </p>
+      </HelpBox>
 
       <section className="mb-8">
         <h2 className="text-lg font-semibold mb-3 text-emerald-400">

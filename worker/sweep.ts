@@ -304,6 +304,25 @@ async function fetchBaro(): Promise<void> {
 
   const isSpecial = relay !== null && /tennocon/i.test(relay);
 
+  // Always store the API's schedule on the heartbeat: when inactive,
+  // activation IS the next arrival — ground truth for the countdown, immune
+  // to off-cadence special visits.
+  await db
+    .from("heartbeat")
+    .upsert({
+      id: 1,
+      baro_activation: arrival,
+      baro_expiry: departure,
+      baro_active: isActive,
+    });
+
+  // A future scheduled arrival is not a visit — recording it would pollute
+  // visit history and recurrence stats. Only record visits in progress.
+  if (!isActive) {
+    console.log(`Baro: not active — next arrival ${arrival}`);
+    return;
+  }
+
   // Upsert visit keyed on arrival
   const visitPayload: Record<string, unknown> = { arrival, departure, relay };
   if (isSpecial) visitPayload.is_special = true;
@@ -947,8 +966,14 @@ async function checkSellSignals(sweepId: number): Promise<void> {
 
   console.log(`${signaling.length} sell signal(s) triggered`);
 
-  // Post Discord message
-  const message = formatSellSignalMessage(signaling, masteryRank);
+  // Post Discord message. Site origin derived from the revalidate URL so the
+  // alert links straight to /positions.
+  const siteUrl =
+    process.env.SITE_URL ??
+    (process.env.REVALIDATE_URL
+      ? new URL(process.env.REVALIDATE_URL).origin
+      : undefined);
+  const message = formatSellSignalMessage(signaling, masteryRank, siteUrl);
   await postDiscord(message, "Sell Signal");
 
   // Update positions with last_alert_condition and last_alert_at
