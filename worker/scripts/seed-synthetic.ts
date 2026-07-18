@@ -387,7 +387,7 @@ async function main() {
   console.log("=".repeat(70));
   console.log("SYNTHETIC DEV WORLD — PLAN");
   console.log("=".repeat(70));
-  console.log(`\nSource DB: ${SUPABASE_URL} (via .env.dev)`);
+  console.log(`\nSource DB: ${process.env.SUPABASE_URL} (via .env.dev)`);
   console.log(`Epoch: ${EPOCH.toISOString().slice(0, 10)}`);
   console.log(`Visit interval: ${VISIT_INTERVAL_DAYS} days`);
   console.log(`Total visits: ${data.visits.length} (includes TennoCon at index ${TENNOCON_VISIT})`);

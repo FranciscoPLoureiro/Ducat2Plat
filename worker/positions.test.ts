@@ -48,7 +48,7 @@ describe("positions e2e — sell signal lifecycle", () => {
       acquiredAt: isoDate(EPOCH, totalDays - 30),
       recoveryDays: 21,
       isRestocked: false,
-      lastAlertCondition: null,
+      alertedConditions: [],
       now: isoDate(EPOCH, totalDays),
     });
 
@@ -63,7 +63,7 @@ describe("positions e2e — sell signal lifecycle", () => {
       acquiredAt: isoDate(EPOCH, totalDays - 10), // only 10 days held < 21 recovery
       recoveryDays: 21,
       isRestocked: false,
-      lastAlertCondition: "target_hit",
+      alertedConditions: ["target_hit"],
       now: isoDate(EPOCH, totalDays),
     });
 
@@ -77,7 +77,7 @@ describe("positions e2e — sell signal lifecycle", () => {
       acquiredAt: isoDate(EPOCH, 0),
       recoveryDays: 21,
       isRestocked: false,
-      lastAlertCondition: null,
+      alertedConditions: [],
       now: isoDate(EPOCH, 25), // 25 days held > 21 recovery_days
     });
 
@@ -91,7 +91,7 @@ describe("positions e2e — sell signal lifecycle", () => {
       acquiredAt: isoDate(EPOCH, 0),
       recoveryDays: 21,
       isRestocked: false,
-      lastAlertCondition: "recovery_elapsed",
+      alertedConditions: ["recovery_elapsed"],
       now: isoDate(EPOCH, 30),
     });
 
@@ -105,7 +105,7 @@ describe("positions e2e — sell signal lifecycle", () => {
       acquiredAt: isoDate(EPOCH, 0),
       recoveryDays: 21,
       isRestocked: true,
-      lastAlertCondition: null,
+      alertedConditions: [],
       now: isoDate(EPOCH, 25),
     });
 
@@ -119,7 +119,7 @@ describe("positions e2e — sell signal lifecycle", () => {
       acquiredAt: isoDate(EPOCH, 0),
       recoveryDays: 21,
       isRestocked: true,
-      lastAlertCondition: "restocked",
+      alertedConditions: ["restocked"],
       now: isoDate(EPOCH, 25),
     });
 
@@ -139,7 +139,7 @@ describe("positions e2e — full sweep simulation", () => {
     const targetPrice = baselineAtBuy * 0.95;
 
     // Position held only 10 days — only target_hit can fire, not recovery_elapsed
-    let lastAlertCondition: string | null = null;
+    const alertedConditions: string[] = [];
 
     // --- First sweep ---
     const signal1 = evaluateSellSignal({
@@ -148,7 +148,7 @@ describe("positions e2e — full sweep simulation", () => {
       acquiredAt: isoDate(EPOCH, totalDays - 10),
       recoveryDays: 21,
       isRestocked: false,
-      lastAlertCondition,
+      alertedConditions,
       now: isoDate(EPOCH, totalDays),
     });
 
@@ -156,7 +156,7 @@ describe("positions e2e — full sweep simulation", () => {
     expect(signal1).toBe("target_hit");
 
     // Record the alert (simulating DB update)
-    lastAlertCondition = signal1;
+    alertedConditions.push(signal1!);
 
     // Format and verify Discord message
     const positions: SellSignalPosition[] = [{
@@ -181,12 +181,39 @@ describe("positions e2e — full sweep simulation", () => {
       acquiredAt: isoDate(EPOCH, totalDays - 10),
       recoveryDays: 21,
       isRestocked: false,
-      lastAlertCondition,
+      alertedConditions,
       now: isoDate(EPOCH, totalDays + 1),
     });
 
     // target_hit already alerted, and only 11 days held < 21 recovery, so no signal
     expect(signal2).toBeNull();
+  });
+
+  it("never re-alerts a condition that already fired (no ping-pong)", () => {
+    const base = {
+      currentMedian: 50,
+      targetPrice: 40,
+      acquiredAt: isoDate(EPOCH, 0),
+      recoveryDays: 10,
+      now: isoDate(EPOCH, 20),
+    };
+    const alerted: string[] = [];
+
+    const s1 = evaluateSellSignal({ ...base, isRestocked: true, alertedConditions: alerted });
+    expect(s1).toBe("restocked");
+    alerted.push(s1!);
+
+    const s2 = evaluateSellSignal({ ...base, isRestocked: true, alertedConditions: alerted });
+    expect(s2).toBe("target_hit");
+    alerted.push(s2!);
+
+    // Restocked already alerted — must not fire again even though still restocked
+    const s3 = evaluateSellSignal({ ...base, isRestocked: true, alertedConditions: alerted });
+    expect(s3).toBe("recovery_elapsed");
+    alerted.push(s3!);
+
+    const s4 = evaluateSellSignal({ ...base, isRestocked: true, alertedConditions: alerted });
+    expect(s4).toBeNull();
   });
 
   it("combined message when >3 positions signal with trade-cap reminder", () => {
@@ -239,7 +266,7 @@ describe("positions e2e — full sweep simulation", () => {
       acquiredAt: isoDate(EPOCH, totalDays - 60), // bought 60 days ago
       recoveryDays: 21,
       isRestocked: true, // this mod appeared in the newly-recorded visit
-      lastAlertCondition: null,
+      alertedConditions: [],
       now: isoDate(EPOCH, totalDays),
     });
 

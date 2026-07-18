@@ -266,25 +266,27 @@ export interface SellSignalInput {
   acquiredAt: string;
   recoveryDays: number | null;
   isRestocked: boolean;
-  lastAlertCondition: string | null;
+  // Every condition that has ever fired for this position. Tracking only the
+  // most recent condition lets alternating conditions re-alert forever.
+  alertedConditions: string[];
   now: string;
 }
 
 export function evaluateSellSignal(input: SellSignalInput): SellSignalCondition | null {
   const {
     currentMedian, targetPrice, acquiredAt, recoveryDays,
-    isRestocked, lastAlertCondition, now,
+    isRestocked, alertedConditions, now,
   } = input;
 
-  if (isRestocked && lastAlertCondition !== "restocked") return "restocked";
+  if (isRestocked && !alertedConditions.includes("restocked")) return "restocked";
 
-  if (currentMedian >= targetPrice && lastAlertCondition !== "target_hit") return "target_hit";
+  if (currentMedian >= targetPrice && !alertedConditions.includes("target_hit")) return "target_hit";
 
   if (recoveryDays !== null) {
     const daysHeld = Math.floor(
       (new Date(now).getTime() - new Date(acquiredAt).getTime()) / 86_400_000,
     );
-    if (daysHeld >= recoveryDays && lastAlertCondition !== "recovery_elapsed") return "recovery_elapsed";
+    if (daysHeld >= recoveryDays && !alertedConditions.includes("recovery_elapsed")) return "recovery_elapsed";
   }
 
   return null;
