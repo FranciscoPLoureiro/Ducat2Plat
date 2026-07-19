@@ -1,5 +1,6 @@
 import { describe, it, expect } from "vitest";
 import {
+  computeVisitVerdict,
   computePpdAtN,
   computeVelocity,
   computeJunkRateFromRanked,
@@ -821,5 +822,46 @@ describe("formatSellSignalMessage", () => {
     const highIdx = msg.indexOf("High PnL");
     const lowIdx = msg.indexOf("Low PnL");
     expect(highIdx).toBeLessThan(lowIdx);
+  });
+});
+
+describe("computeVisitVerdict", () => {
+  const buy = (profit: number, hold: number | null = null) => ({
+    verdict: "BUY & FLIP" as const,
+    sellNowProfit: profit,
+    holdProfit: hold,
+  });
+  const skip = { verdict: "SKIP" as const, sellNowProfit: -5, holdProfit: null };
+
+  it("SKIP when no mod clears profit", () => {
+    const v = computeVisitVerdict([skip, skip, skip]);
+    expect(v.tier).toBe("SKIP");
+    expect(v.buyCount).toBe(0);
+    expect(v.totalProfit).toBe(0);
+  });
+
+  it("SELECTIVE with few buys or low total", () => {
+    const v = computeVisitVerdict([buy(20), buy(15), skip]);
+    expect(v.tier).toBe("SELECTIVE");
+    expect(v.buyCount).toBe(2);
+    expect(v.totalProfit).toBe(35);
+  });
+
+  it("STRONG needs 5+ buys AND 100p+ total", () => {
+    const four = computeVisitVerdict([buy(30), buy(30), buy(30), buy(30)]);
+    expect(four.tier).toBe("SELECTIVE"); // 120p but only 4 buys
+    const fiveCheap = computeVisitVerdict([buy(10), buy(10), buy(10), buy(10), buy(10)]);
+    expect(fiveCheap.tier).toBe("SELECTIVE"); // 5 buys but 50p
+    const strong = computeVisitVerdict([buy(30), buy(30), buy(20), buy(10), buy(15)]);
+    expect(strong.tier).toBe("STRONG");
+  });
+
+  it("uses the better of flip vs hold profit", () => {
+    const v = computeVisitVerdict([buy(10, 60)]);
+    expect(v.totalProfit).toBe(60);
+  });
+
+  it("empty inventory is a SKIP", () => {
+    expect(computeVisitVerdict([]).tier).toBe("SKIP");
   });
 });
