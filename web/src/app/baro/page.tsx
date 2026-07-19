@@ -5,27 +5,29 @@ import {
   getBaroItemHistory,
   getPrimedModStats,
   getBaroAdvisorData,
+  getPositions,
 } from "@/lib/data";
-import Link from "next/link";
 import BaroInventory from "../components/baro-inventory";
 import BaroHistory from "../components/baro-history";
 import PrimedModCharts from "../components/primed-mod-charts";
 import BaroAdvisor from "../components/baro-advisor";
 import StalenessBanner from "../components/staleness-banner";
 import HelpBox from "../components/help-box";
+import NextVisitPrep, { type WatchlistEntry } from "../components/next-visit-prep";
 import { computeBaseline, computeVisitVerdict } from "@/lib/metrics";
 
 export const metadata: Metadata = { title: "Baro Ki'Teer" };
 export const revalidate = 3600;
 
 export default async function BaroPage() {
-  const [countdown, baroResult, itemHistory, primedMods, advisorData] =
+  const [countdown, baroResult, itemHistory, primedMods, advisorData, openPositions] =
     await Promise.all([
       getBaroCountdown(),
       getBaroVisits(),
       getBaroItemHistory(),
       getPrimedModStats(),
       getBaroAdvisorData(),
+      getPositions("open"),
     ]);
 
   const { visits, junkRate, activeVisit } = baroResult;
@@ -34,22 +36,45 @@ export default async function BaroPage() {
   const specialVisitDates = visits.filter((v) => v.is_special).map((v) => v.arrival);
 
   // Between visits: how far each Primed mod has recovered from the last
-  // supply flood. current/baseline < 1 means still crash-priced.
+  // supply flood. current/baseline < 1 means still crash-priced. Full list
+  // (uncapped) — the component paginates; mods you hold are marked so the
+  // panel doubles as sell-timing for your open positions.
   const lastVisitArrival = visits[0]?.arrival ?? null;
-  const watchlist =
+  const lastVisitWasSpecial = visits[0]?.is_special ?? false;
+  const heldByItem = new Map<string, { qty: number; target: number }>();
+  for (const p of openPositions) {
+    const prev = heldByItem.get(p.item_id);
+    heldByItem.set(p.item_id, {
+      qty: (prev?.qty ?? 0) + p.qty,
+      target: prev?.target ?? p.target_price,
+    });
+  }
+
+  let droppedCount = 0;
+  const watchlist: WatchlistEntry[] =
     !activeVisit && lastVisitArrival
       ? primedMods
-          .map((mod) => {
+          .map((mod): WatchlistEntry | null => {
             const prices = mod.stats.map((s) => ({ date: s.stat_date, median: s.median }));
             const baseline = computeBaseline(prices, lastVisitArrival);
             const current = prices.length ? prices[prices.length - 1].median : null;
-            return baseline && baseline > 0 && current !== null
-              ? { name: mod.item_name, url_name: mod.url_name, baseline, current, pct: current / baseline }
-              : null;
+            if (!baseline || baseline <= 0 || current === null) {
+              droppedCount++;
+              return null;
+            }
+            const held = heldByItem.get(mod.item_id);
+            return {
+              name: mod.item_name,
+              url_name: mod.url_name,
+              baseline,
+              current,
+              pct: current / baseline,
+              heldQty: held?.qty ?? null,
+              targetPrice: held?.target ?? null,
+            };
           })
-          .filter((w): w is NonNullable<typeof w> => w !== null)
+          .filter((w): w is WatchlistEntry => w !== null)
           .sort((a, b) => a.pct - b.pct)
-          .slice(0, 15)
       : [];
 
   return (
@@ -62,56 +87,19 @@ export default async function BaroPage() {
       </header>
 
       {!activeVisit && (
-        <section className="mb-8">
-          <h2 className="text-lg font-semibold mb-3 text-amber-400">Next Visit Prep</h2>
-          <div className="border border-zinc-800 rounded px-4 py-3 space-y-3 text-sm">
-            <p className="text-zinc-300">
-              {countdown.daysUntil !== null && countdown.arrival ? (
-                <>
-                  Baro arrives{" "}
-                  <span className="text-amber-400 font-semibold">
-                    {new Date(countdown.arrival).toLocaleDateString("en-US", {
-                      weekday: "long", month: "short", day: "numeric", hour: "numeric",
-                    })}
-                  </span>{" "}
-                  ({countdown.daysUntil}d). Stock ducats now —{" "}
-                  <Link href="/" className="text-emerald-400 hover:underline">
-                    junk is cheapest between visits
-                  </Link>
-                  .
-                </>
-              ) : (
-                <>Next arrival unknown — waiting for the next sweep.</>
-              )}
-            </p>
-            {watchlist.length > 0 && (
-              <div>
-                <p className="text-zinc-500 mb-2">
-                  Primed mod recovery since the last visit&apos;s supply flood — mods
-                  below 100% are still crash-priced (bad time to sell, decent time to buy from players):
-                </p>
-                <div className="flex flex-wrap gap-2">
-                  {watchlist.map((w) => (
-                    <Link
-                      key={w.url_name}
-                      href={`/item/${w.url_name}`}
-                      title={`baseline ${w.baseline}p → now ${w.current}p`}
-                      className={`px-2 py-1 rounded border text-xs transition-colors hover:border-zinc-500 ${
-                        w.pct < 0.85
-                          ? "border-red-900 text-red-300"
-                          : w.pct < 1
-                            ? "border-amber-900 text-amber-300"
-                            : "border-emerald-900 text-emerald-300"
-                      }`}
-                    >
-                      {w.name} {(w.pct * 100).toFixed(0)}%
-                    </Link>
-                  ))}
-                </div>
-              </div>
-            )}
-          </div>
-        </section>
+        <NextVisitPrep
+          arrivalLabel={
+            countdown.arrival
+              ? new Date(countdown.arrival).toLocaleDateString("en-US", {
+                  weekday: "long", month: "short", day: "numeric", hour: "numeric",
+                })
+              : null
+          }
+          daysUntil={countdown.daysUntil}
+          watchlist={watchlist}
+          droppedCount={droppedCount}
+          lastVisitWasSpecial={lastVisitWasSpecial}
+        />
       )}
 
       {advisorData && advisorData.mods.length > 0 && (
