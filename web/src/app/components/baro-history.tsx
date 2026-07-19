@@ -90,6 +90,12 @@ export default function BaroHistory({ items }: { items: BaroItemHistory[] }) {
               >
                 Times Carried
               </th>
+              <th className="py-2 px-3 font-medium text-right" title="Baro's ducat price at the most recent carry">
+                Ducats
+              </th>
+              <th className="py-2 px-3 font-medium text-right" title="Baro's credit price at the most recent carry">
+                Credits
+              </th>
             </tr>
           </thead>
           <tbody>
@@ -123,11 +129,17 @@ export default function BaroHistory({ items }: { items: BaroItemHistory[] }) {
                 <td className="py-2 px-3 text-right text-zinc-400">
                   {item.visits.length}
                 </td>
+                <td className="py-2 px-3 text-right text-amber-400">
+                  {item.ducat_cost ?? "—"}
+                </td>
+                <td className="py-2 px-3 text-right text-zinc-400">
+                  {item.credit_cost !== null ? item.credit_cost.toLocaleString("en-US") : "—"}
+                </td>
               </tr>
             ))}
             {pageItems.length === 0 && (
               <tr>
-                <td colSpan={3} className="py-8 text-center text-zinc-500">
+                <td colSpan={5} className="py-8 text-center text-zinc-500">
                   {items.length === 0
                     ? "No regular Baro visits recorded yet — special visits (e.g. TennoCon) are excluded from recurrence stats."
                     : "No items match your filter."}

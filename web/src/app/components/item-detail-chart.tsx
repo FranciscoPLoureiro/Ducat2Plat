@@ -1,6 +1,7 @@
 "use client";
 
 import { useMemo, useState } from "react";
+import ChartWindowToggle, { type ChartWindow, windowCutoff } from "./chart-window";
 import {
   LineChart,
   Line,
@@ -30,11 +31,14 @@ export default function ItemDetailChart({
   stats,
   vault_events,
   baro_visit_dates,
+  baro_special_dates,
 }: {
   stats: ItemDetail["stats"];
   vault_events: VaultEvent[];
   baro_visit_dates: string[];
+  baro_special_dates?: string[];
 }) {
+  const [chartWindow, setChartWindow] = useState<ChartWindow>(null);
   const modRanks = useMemo(() => {
     const ranks = [...new Set(stats.map((s) => s.mod_rank))].sort(
       (a, b) => a - b,
@@ -47,10 +51,12 @@ export default function ItemDetailChart({
     isMod ? (modRanks.includes(0) ? 0 : modRanks[0]) : -1,
   );
 
-  const filtered = useMemo(
-    () => stats.filter((s) => s.mod_rank === selectedRank),
-    [stats, selectedRank],
-  );
+  const filtered = useMemo(() => {
+    const cutoff = windowCutoff(chartWindow);
+    return stats.filter(
+      (s) => s.mod_rank === selectedRank && (!cutoff || s.stat_date >= cutoff),
+    );
+  }, [stats, selectedRank, chartWindow]);
 
   const dateRange = useMemo(() => {
     if (!filtered.length) return { min: "", max: "" };
@@ -63,6 +69,14 @@ export default function ItemDetailChart({
         .map((d) => d.slice(0, 10))
         .filter((d) => dateRange.min && dateRange.max && d >= dateRange.min && d <= dateRange.max),
     [baro_visit_dates, dateRange],
+  );
+
+  const specialLines = useMemo(
+    () =>
+      (baro_special_dates ?? [])
+        .map((d) => d.slice(0, 10))
+        .filter((d) => dateRange.min && dateRange.max && d >= dateRange.min && d <= dateRange.max),
+    [baro_special_dates, dateRange],
   );
 
   const vaultLines = useMemo(
@@ -103,9 +117,12 @@ export default function ItemDetailChart({
       )}
 
       <div>
-        <h3 className="text-sm font-medium text-zinc-400 mb-2">
-          Median Price (plat)
-        </h3>
+        <div className="flex items-center justify-between mb-2">
+          <h3 className="text-sm font-medium text-zinc-400">
+            Median Price (plat)
+          </h3>
+          <ChartWindowToggle value={chartWindow} onChange={setChartWindow} />
+        </div>
         <ResponsiveContainer width="100%" height={300}>
           <LineChart data={filtered}>
             <XAxis
@@ -136,6 +153,17 @@ export default function ItemDetailChart({
                 stroke="#f59e0b"
                 strokeDasharray="4 3"
                 strokeOpacity={0.5}
+              />
+            ))}
+            {specialLines.map((d, i) => (
+              <ReferenceLine
+                key={`special-${i}`}
+                x={d}
+                stroke="#a855f7"
+                strokeWidth={2}
+                strokeDasharray="4 3"
+                strokeOpacity={0.7}
+                label={{ value: "TC", position: "top", fill: "#a855f7", fontSize: 11, fontWeight: 600 }}
               />
             ))}
             {vaultLines.map((e, i) => (
@@ -200,6 +228,16 @@ export default function ItemDetailChart({
                 strokeOpacity={0.5}
               />
             ))}
+            {specialLines.map((d, i) => (
+              <ReferenceLine
+                key={`special-v-${i}`}
+                x={d}
+                stroke="#a855f7"
+                strokeWidth={2}
+                strokeDasharray="4 3"
+                strokeOpacity={0.7}
+              />
+            ))}
             {vaultLines.map((e, i) => (
               <ReferenceLine
                 key={`vault-v-${i}`}
@@ -225,6 +263,10 @@ function Legend() {
       <span className="flex items-center gap-1.5">
         <span className="inline-block w-4 h-0 border-t-2 border-dashed border-amber-500" />
         Baro visit
+      </span>
+      <span className="flex items-center gap-1.5">
+        <span className="inline-block w-4 h-0 border-t-2 border-dashed border-purple-500" />
+        TennoCon (full catalog)
       </span>
       <span className="flex items-center gap-1.5">
         <span className="inline-block w-4 h-0 border-t-2 border-dashed border-red-500" />

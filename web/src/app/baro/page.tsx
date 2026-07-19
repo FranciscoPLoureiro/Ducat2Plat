@@ -30,7 +30,8 @@ export default async function BaroPage() {
 
   const { visits, junkRate, activeVisit } = baroResult;
 
-  const baroVisitDates = visits.map((v) => v.arrival);
+  const baroVisitDates = visits.filter((v) => !v.is_special).map((v) => v.arrival);
+  const specialVisitDates = visits.filter((v) => v.is_special).map((v) => v.arrival);
 
   // Between visits: how far each Primed mod has recovered from the last
   // supply flood. current/baseline < 1 means still crash-priced.
@@ -169,7 +170,11 @@ export default async function BaroPage() {
           <p className="text-sm text-zinc-500 mb-3">
             Rank-0 median price history. Vertical lines mark Baro visits.
           </p>
-          <PrimedModCharts mods={primedMods} baroVisitDates={baroVisitDates} />
+          <PrimedModCharts
+            mods={primedMods}
+            baroVisitDates={baroVisitDates}
+            specialVisitDates={specialVisitDates}
+          />
         </section>
       )}
     </div>

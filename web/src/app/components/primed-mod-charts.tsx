@@ -8,9 +8,11 @@ const ModChart = lazy(() => import("@/app/components/mod-chart"));
 export default function PrimedModCharts({
   mods,
   baroVisitDates,
+  specialVisitDates,
 }: {
   mods: PrimedModStats[];
   baroVisitDates: string[];
+  specialVisitDates?: string[];
 }) {
   const [expanded, setExpanded] = useState<Set<string>>(new Set());
 
@@ -53,6 +55,7 @@ export default function PrimedModCharts({
                   <ModChart
                     stats={mod.stats}
                     baroVisitDates={baroVisitDates}
+                    specialVisitDates={specialVisitDates}
                     vaultEvents={mod.vault_events}
                   />
                 </Suspense>

@@ -507,6 +507,10 @@ export interface BaroItemHistory {
   // True when the item matches a warframe.market item (tradeable); false for
   // Baro-only cosmetics, which are noise for arbitrage purposes.
   matched: boolean;
+  // Costs from the most recent visit that carried the item (Baro reprices
+  // rarely, so this is effectively "the" price).
+  ducat_cost: number | null;
+  credit_cost: number | null;
   visits: { arrival: string; visits_ago: number }[];
 }
 
@@ -525,11 +529,17 @@ export async function getBaroItemHistory(): Promise<BaroItemHistory[]> {
   if (!visits?.length) return [];
 
   const visitIds = visits.map((v) => v.id);
-  const allItems = await fetchAll<{ visit_id: number; item_name: string; item_id: string | null }>(
+  const allItems = await fetchAll<{
+    visit_id: number;
+    item_name: string;
+    item_id: string | null;
+    ducat_cost: number;
+    credit_cost: number;
+  }>(
     (from, to) =>
       db
         .from("baro_visit_items")
-        .select("visit_id, item_name, item_id")
+        .select("visit_id, item_name, item_id, ducat_cost, credit_cost")
         .in("visit_id", visitIds)
         .order("visit_id", { ascending: true })
         .order("item_name", { ascending: true })
@@ -543,6 +553,7 @@ export async function getBaroItemHistory(): Promise<BaroItemHistory[]> {
 
   const itemVisits = new Map<string, { arrival: string; visits_ago: number }[]>();
   const itemMatched = new Map<string, boolean>();
+  const itemCost = new Map<string, { idx: number; ducat: number; credit: number }>();
   for (const vi of allItems) {
     const idx = visitIndexMap.get(vi.visit_id);
     if (idx === undefined) continue;
@@ -552,12 +563,23 @@ export async function getBaroItemHistory(): Promise<BaroItemHistory[]> {
       visits_ago: idx,
     });
     if (vi.item_id !== null) itemMatched.set(vi.item_name, true);
+    const prev = itemCost.get(vi.item_name);
+    if (!prev || idx < prev.idx) {
+      itemCost.set(vi.item_name, { idx, ducat: vi.ducat_cost, credit: vi.credit_cost });
+    }
   }
 
   const results: BaroItemHistory[] = [];
   for (const [item_name, v] of itemVisits) {
     v.sort((a, b) => a.visits_ago - b.visits_ago);
-    results.push({ item_name, matched: itemMatched.get(item_name) ?? false, visits: v });
+    const cost = itemCost.get(item_name);
+    results.push({
+      item_name,
+      matched: itemMatched.get(item_name) ?? false,
+      ducat_cost: cost?.ducat ?? null,
+      credit_cost: cost?.credit ?? null,
+      visits: v,
+    });
   }
   results.sort((a, b) => a.visits[0].visits_ago - b.visits[0].visits_ago);
   return results;
@@ -579,6 +601,7 @@ export interface ItemDetail {
   stats: { stat_date: string; median: number; volume: number; mod_rank: number }[];
   vault_events: VaultEvent[];
   baro_visit_dates: string[];
+  baro_special_dates: string[];
 }
 
 export async function getItemDetail(url_name: string): Promise<ItemDetail | null> {
@@ -605,7 +628,7 @@ export async function getItemDetail(url_name: string): Promise<ItemDetail | null
       .order("effective_date", { ascending: true }),
     db
       .from("baro_visits")
-      .select("arrival")
+      .select("arrival, is_special")
       .order("arrival", { ascending: true }),
   ]);
 
@@ -624,7 +647,12 @@ export async function getItemDetail(url_name: string): Promise<ItemDetail | null
       mod_rank: s.mod_rank,
     })),
     vault_events: (vaultResult.data ?? []) as VaultEvent[],
-    baro_visit_dates: (baroResult.data ?? []).map((v) => v.arrival),
+    baro_visit_dates: (baroResult.data ?? [])
+      .filter((v) => !v.is_special)
+      .map((v) => v.arrival),
+    baro_special_dates: (baroResult.data ?? [])
+      .filter((v) => v.is_special)
+      .map((v) => v.arrival),
   };
 }
 

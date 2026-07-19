@@ -279,10 +279,29 @@ function ModRow({
         ? "text-sky-400"
         : "text-zinc-500";
 
-  const holdLabel =
-    mod.verdict === "BUY & HOLD" && mod.holdDays !== null
-      ? ` ~${mod.holdDays}d`
-      : "";
+  // Recovery-speed badge: fast rebounds free capital quickly; at/above the
+  // 42-day cap means the estimate is a bound, not an observation.
+  const holdBadge =
+    mod.verdict === "BUY & HOLD" && mod.holdDays !== null ? (
+      <span
+        className={
+          mod.holdDays < 21
+            ? "text-emerald-300"
+            : mod.holdDays < 42
+              ? "text-amber-300"
+              : "text-red-300"
+        }
+        title={
+          mod.holdDays < 21
+            ? "Fast recovery — capital freed quickly"
+            : mod.holdDays < 42
+              ? "Moderate recovery"
+              : "Slow/unknown recovery — conservative bound, capital may sit for weeks"
+        }
+      >
+        {" "}~{mod.holdDays}d
+      </span>
+    ) : null;
 
   return (
     <>
@@ -313,7 +332,7 @@ function ModRow({
           )}
         </td>
         <td className={`py-2 px-3 font-semibold whitespace-nowrap ${verdictColor}`}>
-          {mod.verdict}{holdLabel}
+          {mod.verdict}{holdBadge}
           {showBuyButton && !buyFormOpen && (
             <button
               className="ml-2 px-2 py-0.5 text-xs rounded bg-emerald-800 hover:bg-emerald-700 text-emerald-200 font-normal"

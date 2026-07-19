@@ -1,6 +1,6 @@
 "use client";
 
-import { useMemo } from "react";
+import { useMemo, useState } from "react";
 import {
   LineChart,
   Line,
@@ -12,6 +12,7 @@ import {
 } from "recharts";
 import type { PrimedModStats } from "@/lib/data";
 import type { VaultEvent } from "@/lib/data";
+import ChartWindowToggle, { type ChartWindow, windowCutoff } from "./chart-window";
 
 const VAULT_COLORS: Record<string, string> = {
   vaulted: "#ef4444",
@@ -26,18 +27,35 @@ const VAULT_LABELS: Record<string, string> = {
 };
 
 export default function ModChart({
-  stats,
+  stats: allStats,
   baroVisitDates,
+  specialVisitDates,
   vaultEvents,
 }: {
   stats: PrimedModStats["stats"];
   baroVisitDates: string[];
+  specialVisitDates?: string[];
   vaultEvents?: VaultEvent[];
 }) {
+  const [chartWindow, setChartWindow] = useState<ChartWindow>(null);
+
+  const stats = useMemo(() => {
+    const cutoff = windowCutoff(chartWindow);
+    return cutoff ? allStats.filter((s) => s.stat_date >= cutoff) : allStats;
+  }, [allStats, chartWindow]);
+
   const dateRange = useMemo(() => {
     if (!stats.length) return { min: "", max: "" };
     return { min: stats[0].stat_date, max: stats[stats.length - 1].stat_date };
   }, [stats]);
+
+  const specialLines = useMemo(
+    () =>
+      (specialVisitDates ?? [])
+        .map((d) => d.slice(0, 10))
+        .filter((d) => dateRange.min && dateRange.max && d >= dateRange.min && d <= dateRange.max),
+    [specialVisitDates, dateRange],
+  );
 
   const visitLines = useMemo(
     () =>
@@ -61,6 +79,9 @@ export default function ModChart({
 
   return (
     <div>
+      <div className="flex justify-end mb-1">
+        <ChartWindowToggle value={chartWindow} onChange={setChartWindow} />
+      </div>
       <ResponsiveContainer width="100%" height={250}>
         <LineChart data={stats}>
           <XAxis
@@ -93,6 +114,23 @@ export default function ModChart({
               strokeOpacity={0.5}
             />
           ))}
+          {specialLines.map((d, i) => (
+            <ReferenceLine
+              key={`special-${i}`}
+              x={d}
+              stroke="#a855f7"
+              strokeWidth={2}
+              strokeDasharray="4 3"
+              strokeOpacity={0.7}
+              label={{
+                value: "TC",
+                position: "top",
+                fill: "#a855f7",
+                fontSize: 10,
+                fontWeight: 600,
+              }}
+            />
+          ))}
           {vaultLines.map((e, i) => (
             <ReferenceLine
               key={`vault-${i}`}
@@ -122,6 +160,10 @@ export default function ModChart({
         <span className="flex items-center gap-1">
           <span className="inline-block w-3 h-0 border-t border-dashed border-amber-500" />
           Baro
+        </span>
+        <span className="flex items-center gap-1">
+          <span className="inline-block w-3 h-0 border-t-2 border-dashed border-purple-500" />
+          TennoCon (full catalog)
         </span>
         <span className="flex items-center gap-1">
           <span className="inline-block w-3 h-0 border-t-2 border-dashed border-red-500" />
