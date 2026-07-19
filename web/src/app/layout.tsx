@@ -31,10 +31,10 @@ export default function RootLayout({
               Ducat2Plat
             </Link>
             <Link href="/" className="text-zinc-400 hover:text-zinc-100 transition-colors">
-              Ranking
-            </Link>
-            <Link href="/bundles" className="text-zinc-400 hover:text-zinc-100 transition-colors">
               Bundles
+            </Link>
+            <Link href="/ranking" className="text-zinc-400 hover:text-zinc-100 transition-colors">
+              Ranking
             </Link>
             <Link href="/baro" className="text-zinc-400 hover:text-zinc-100 transition-colors">
               Baro
