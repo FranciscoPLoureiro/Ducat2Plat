@@ -52,3 +52,29 @@ role + secret keys, then update:
 
 Optional afterwards: purge history with `git filter-repo` — with rotation done,
 this is cosmetic for a private repo.
+
+## 4. Point `SUPABASE_DB_URL` at the Session pooler (blocks weekly backup)
+
+The weekly backup has never succeeded. Root cause: the `SUPABASE_DB_URL` GitHub
+secret is the **direct** connection string (`db.argvwfoarjohzkorsble.supabase.co
+:5432`), which Supabase now serves over **IPv6 only**. GitHub Actions runners
+have no IPv6, so `pg_dump` fails with "Network is unreachable" — and the old
+workflow hid that behind a pipe, producing an empty 174-byte "backup". The
+workflow is now hardened (v17 client, size guard) but still can't connect until
+the secret is fixed.
+
+Fix (one action):
+1. Supabase dashboard → Project Settings → Database → Connection string →
+   **Session pooler** (aka "Session mode", host `aws-0-<region>.pooler.supabase.com`,
+   port 5432, user `postgres.argvwfoarjohzkorsble`). Copy that URI and insert
+   the DB password.
+   - Use **Session** mode (port 5432), NOT Transaction (6543) — pg_dump needs
+     session-level features.
+2. GitHub → repo Settings → Secrets and variables → Actions → set
+   `SUPABASE_DB_URL` to that pooler string.
+3. Re-run: `gh workflow run backup.yml`, then confirm the artifact is hundreds
+   of KB (not ~200 bytes) and, once, actually restore it into the throwaway
+   Supabase project to prove it's real (the M7 acceptance check never done).
+
+Note: this does not affect the local `SUPABASE_DB_URL_PROD` in web/.env.local —
+that direct URL keeps working from your machine because you have IPv6.
