@@ -1,4 +1,5 @@
 import type { Metadata } from "next";
+import Link from "next/link";
 import { getBaroCountdown, getRankedItems } from "@/lib/data";
 import RankingTable from "../components/ranking-table";
 import DucatPlanner from "../components/ducat-planner";
@@ -33,7 +34,7 @@ export default async function RankingPage() {
         </p>
         <p>
           This is the price-reference / engine view. For the actual trade-shaped plays, use{" "}
-          <a href="/" className="text-emerald-400 hover:underline">Bundles</a>. Listings here are from the
+          <Link href="/" className="text-emerald-400 hover:underline">Bundles</Link>. Listings here are from the
           last daily sweep and can be up to a day old.
         </p>
       </HelpBox>

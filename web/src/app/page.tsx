@@ -1,4 +1,5 @@
 import type { Metadata } from "next";
+import Link from "next/link";
 import { getBundles } from "@/lib/data";
 import BundlesLive from "./components/bundles-live";
 import StalenessBanner from "./components/staleness-banner";
@@ -19,7 +20,7 @@ export default async function Home() {
         <p className="text-sm text-zinc-500 mt-1">
           Sellers offering 2+ candidate items — buy their whole basket in one trade for better
           trade-slot efficiency. This is the trade-shaped view; the{" "}
-          <a href="/ranking" className="text-emerald-400 hover:underline">ranking</a> is the price reference.
+          <Link href="/ranking" className="text-emerald-400 hover:underline">ranking</Link> is the price reference.
         </p>
         <p className="text-xs text-zinc-600 mt-1">
           The page loads the daily sweep — click <span className="text-zinc-400">Refresh listings</span> for
