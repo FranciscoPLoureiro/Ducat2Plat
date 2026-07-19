@@ -13,7 +13,7 @@ import PrimedModCharts from "../components/primed-mod-charts";
 import BaroAdvisor from "../components/baro-advisor";
 import StalenessBanner from "../components/staleness-banner";
 import HelpBox from "../components/help-box";
-import { computeBaseline } from "@/lib/metrics";
+import { computeBaseline, computeVisitVerdict } from "@/lib/metrics";
 
 export const metadata: Metadata = { title: "Baro Ki'Teer" };
 export const revalidate = 3600;
@@ -116,6 +116,10 @@ export default async function BaroPage() {
 
       {advisorData && advisorData.mods.length > 0 && (
         <section className="mb-8">
+          <VisitVerdictBanner
+            verdict={computeVisitVerdict(advisorData.mods)}
+            isSpecial={activeVisit?.is_special ?? false}
+          />
           <h2 className="text-lg font-semibold mb-3 text-emerald-400">
             Hold Advisor
           </h2>
@@ -176,6 +180,37 @@ export default async function BaroPage() {
             specialVisitDates={specialVisitDates}
           />
         </section>
+      )}
+    </div>
+  );
+}
+
+function VisitVerdictBanner({
+  verdict,
+  isSpecial,
+}: {
+  verdict: ReturnType<typeof computeVisitVerdict>;
+  isSpecial: boolean;
+}) {
+  const styles = {
+    STRONG: "bg-emerald-900/40 border-emerald-700 text-emerald-200",
+    SELECTIVE: "bg-amber-900/30 border-amber-800 text-amber-200",
+    SKIP: "bg-zinc-800/60 border-zinc-700 text-zinc-300",
+  }[verdict.tier];
+  const text = {
+    STRONG: `Strong visit — ${verdict.buyCount} profitable buys worth ~${Math.round(verdict.totalProfit)}p combined. Spend your ducats.`,
+    SELECTIVE: `Selective visit — ${verdict.buyCount} mod${verdict.buyCount === 1 ? "" : "s"} clear${verdict.buyCount === 1 ? "s" : ""} profit (~${Math.round(verdict.totalProfit)}p combined). Buy the top picks, bank the rest.`,
+    SKIP: "Weak visit — nothing clears profit at current prices. Hold your ducats for next time.",
+  }[verdict.tier];
+
+  return (
+    <div className={`mb-4 px-4 py-3 rounded border text-sm font-medium ${styles}`}>
+      {text}
+      {isSpecial && (
+        <span className="block mt-1 font-normal text-xs opacity-75">
+          Special (full-catalog) visit: resale prices are flood-depressed, so
+          verdicts skew pessimistic — holds recover slower than usual.
+        </span>
       )}
     </div>
   );

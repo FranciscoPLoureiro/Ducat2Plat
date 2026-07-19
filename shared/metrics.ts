@@ -354,6 +354,36 @@ function signalLabel(condition: SellSignalCondition): string {
   }
 }
 
+// ── Visit-level verdict ─────────────────────────────────────────────
+// Answers "is this visit worth spending ducats on?" before the user reads
+// per-mod rows. Transparent thresholds, no weighting magic: a visit is as
+// good as the number of profitable buys and the plat they add up to.
+
+export interface VisitVerdict {
+  tier: "STRONG" | "SELECTIVE" | "SKIP";
+  buyCount: number;
+  totalProfit: number; // best-leg (flip vs hold) profit summed over BUY mods
+}
+
+export function computeVisitVerdict(
+  mods: { verdict: Verdict; sellNowProfit: number; holdProfit: number | null }[],
+): VisitVerdict {
+  const buys = mods.filter(
+    (m) => m.verdict === "BUY & FLIP" || m.verdict === "BUY & HOLD",
+  );
+  const totalProfit = buys.reduce(
+    (s, m) => s + Math.max(m.sellNowProfit, m.holdProfit ?? m.sellNowProfit),
+    0,
+  );
+  const tier: VisitVerdict["tier"] =
+    buys.length === 0
+      ? "SKIP"
+      : buys.length >= 5 && totalProfit >= 100
+        ? "STRONG"
+        : "SELECTIVE";
+  return { tier, buyCount: buys.length, totalProfit };
+}
+
 export function greedyBasketOptimize(
   items: BasketCandidate[],
   ducatWallet: number,

@@ -3,6 +3,10 @@ name: Daily Sweep
 on:
   schedule:
     - cron: '0 6 * * *'
+    # Baro lands ~13:00 UTC on visit Fridays; without this the 06:00 sweep
+    # misses his arrival and the advisor stays empty until Saturday. Runs
+    # every Friday — idempotent sweeps make off-visit Fridays harmless.
+    - cron: '0 14 * * 5'
   workflow_dispatch:
 
 concurrency:

@@ -99,6 +99,16 @@ function Section({ title, items, defaultOpen, showRoi, showMaxRank, onToggleRank
                           {displayMedian !== null
                             ? `${Math.round(displayMedian)}p`
                             : "—"}
+                          {showMaxRank &&
+                            item.resale_median_max_rank !== null &&
+                            item.resale_median !== null && (
+                              <span
+                                className="ml-1 text-xs text-zinc-500"
+                                title="Max-rank premium over rank-0. Maxing a Primed mod costs ~40.9k Endo + ~2M credits — roughly 120p+ of Ayatan value — so the spread must clear that to beat selling at rank 0."
+                              >
+                                (+{Math.round(item.resale_median_max_rank - item.resale_median)}p)
+                              </span>
+                            )}
                         </td>
                         <td className="py-2 px-3 text-right font-semibold">
                           {item.roi !== null ? (
