@@ -3,6 +3,7 @@
 import { useState, useMemo, useCallback } from "react";
 import type { RankedItem } from "@/lib/data";
 import { useSettings, updateSettings } from "@/lib/settings";
+import { buildWhisper } from "@/lib/whisper";
 
 const LS_KEY_HAVE = "d2p_ducats_have";
 const LS_KEY_NEED = "d2p_ducats_need";
@@ -113,13 +114,6 @@ function groupBySeller(purchases: PlannedPurchase[]): SellerGroup[] {
   return groups;
 }
 
-function buildWhisper(group: SellerGroup): string {
-  const itemList = group.purchases
-    .map((p) => (p.quantity > 1 ? `${p.item_name} x${p.quantity}` : p.item_name))
-    .join(", ");
-  return `/w ${group.seller_name} Hi! WTB: ${itemList} for ${group.total_plat}p (warframe.market)`;
-}
-
 // Safe to read in a useState initializer: the panel renders closed, so these
 // values never appear in server-rendered HTML and cannot cause a hydration
 // mismatch.
@@ -164,7 +158,7 @@ export default function DucatPlanner({ items }: { items: RankedItem[] }) {
   }, [items, shortfall]);
 
   async function copyWhisper(group: SellerGroup) {
-    const text = buildWhisper(group);
+    const text = buildWhisper(group.seller_name, group.purchases, group.total_plat);
     try {
       await navigator.clipboard.writeText(text);
       setCopied(group.seller_name);

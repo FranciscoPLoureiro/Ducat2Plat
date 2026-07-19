@@ -3,13 +3,8 @@
 import { useMemo, useState } from "react";
 import type { BundleSeller } from "@/lib/data";
 import { useSettings } from "@/lib/settings";
+import { buildWhisper } from "@/lib/whisper";
 
-function buildWhisper(bundle: BundleSeller): string {
-  const itemList = bundle.items
-    .map((i) => (i.quantity > 1 ? `${i.item_name} x${i.quantity}` : i.item_name))
-    .join(", ");
-  return `/w ${bundle.seller_name} Hi! WTB: ${itemList} for ${bundle.total_plat}p (warframe.market)`;
-}
 
 export default function BundlesTable({ bundles }: { bundles: BundleSeller[] }) {
   const [expanded, setExpanded] = useState<Set<string>>(new Set());
@@ -29,7 +24,9 @@ export default function BundlesTable({ bundles }: { bundles: BundleSeller[] }) {
 
   async function copyWhisper(bundle: BundleSeller) {
     try {
-      await navigator.clipboard.writeText(buildWhisper(bundle));
+      await navigator.clipboard.writeText(
+        buildWhisper(bundle.seller_name, bundle.items, bundle.total_plat),
+      );
       setCopied(bundle.seller_name);
       setTimeout(() => setCopied(null), 2000);
     } catch {}
