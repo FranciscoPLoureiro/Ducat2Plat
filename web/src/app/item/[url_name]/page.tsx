@@ -63,6 +63,7 @@ export default async function ItemPage({
         stats={item.stats}
         vault_events={item.vault_events}
         baro_visit_dates={item.baro_visit_dates}
+        baro_special_dates={item.baro_special_dates}
       />
 
       {item.vault_events.length > 0 && (
