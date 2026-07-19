@@ -13,23 +13,40 @@ jobs:
     steps:
       # Supabase runs Postgres 17, and pg_dump refuses to dump a server newer
       # than itself — so we need client 17, which isn't in the runner's default
-      # repos. Pull it from the official PostgreSQL apt repository (PGDG).
+      # repos. Pull it from the official PostgreSQL apt repository (PGDG). The
+      # runner ships client 16, so we call the v17 binary by full path rather
+      # than relying on pg_wrapper's version selection.
       - name: Install PostgreSQL 17 client
         run: |
           sudo sh -c 'echo "deb https://apt.postgresql.org/pub/repos/apt $(lsb_release -cs)-pgdg main" > /etc/apt/sources.list.d/pgdg.list'
           curl -fsSL https://www.postgresql.org/media/keys/ACCC4CF8.asc | sudo gpg --dearmor -o /etc/apt/trusted.gpg.d/pgdg.gpg
-          sudo apt-get update -qq
-          sudo apt-get install -y -qq postgresql-client-17
-          pg_dump --version
+          sudo apt-get update
+          sudo apt-get install -y postgresql-client-17
+          /usr/lib/postgresql/17/bin/pg_dump --version
 
       - name: Set backup date
         id: date
         run: echo "date=$(date -u +%Y-%m-%d)" >> "$GITHUB_OUTPUT"
 
+      # NOTE: SUPABASE_DB_URL must be the Supabase *Session pooler* connection
+      # string (IPv4). The direct db.<ref>.supabase.co host is IPv6-only and
+      # GitHub runners have no IPv6, so a direct URL fails "Network unreachable".
       - name: Dump database
         env:
           SUPABASE_DB_URL: ${{ secrets.SUPABASE_DB_URL }}
-        run: pg_dump --no-owner --no-privileges "$SUPABASE_DB_URL" | gzip > "backup-${{ steps.date.outputs.date }}.sql.gz"
+        run: |
+          set -o pipefail
+          /usr/lib/postgresql/17/bin/pg_dump --no-owner --no-privileges "$SUPABASE_DB_URL" > backup.sql
+          bytes=$(stat -c%s backup.sql)
+          echo "Dump size: $bytes bytes"
+          # A real dump of the archive is hundreds of KB+; anything tiny means
+          # the dump errored while the old `| gzip` pipe hid pg_dump's failure.
+          if [ "$bytes" -lt 10000 ]; then
+            echo "::error::Dump is only $bytes bytes — treating as a failed backup"
+            exit 1
+          fi
+          gzip backup.sql
+          mv backup.sql.gz "backup-${{ steps.date.outputs.date }}.sql.gz"
 
       - name: Upload backup artifact
         uses: actions/upload-artifact@v4
