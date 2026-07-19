@@ -49,7 +49,7 @@ jobs:
           mv backup.sql.gz "backup-${{ steps.date.outputs.date }}.sql.gz"
 
       - name: Upload backup artifact
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: db-backup-${{ steps.date.outputs.date }}
           path: backup-*.sql.gz
