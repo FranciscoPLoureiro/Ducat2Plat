@@ -248,7 +248,7 @@ export default function DucatPlanner({ items }: { items: RankedItem[] }) {
                   <span className="text-amber-400 font-semibold">{totalDucats} ducats</span>
                 </span>
                 <span className="text-zinc-500">
-                  ({totalPurchases} item{totalPurchases !== 1 ? "s" : ""} from{" "}
+                  ({purchases.length} item{purchases.length !== 1 ? "s" : ""} from{" "}
                   {sellerGroups.length} seller{sellerGroups.length !== 1 ? "s" : ""})
                 </span>
                 {settings.masteryRank !== null && (
