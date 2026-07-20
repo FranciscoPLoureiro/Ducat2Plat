@@ -1,12 +1,12 @@
-// Warframe's in-game chat caps a single message near ~100 characters. Instead
-// of truncating or collapsing to a bare count, split the itemized whisper into
-// a sequence of messages, each under the cap: the first opens with the
-// greeting, continuations are prefixed "+", and the total closes the last one.
-// The UI renders one copy button per part.
-export const WF_SAFE_LEN = 90;
+// Warframe's in-game chat caps a single message at ~300 characters. Split the
+// itemized whisper into a sequence of messages, each under the cap: the first
+// opens with the greeting, continuations are prefixed "+", and the total closes
+// the last one. The UI renders one copy button per part.
+export const WF_SAFE_LEN = 300;
 
 export interface WhisperItem {
   item_name: string;
+  price: number;
   quantity: number;
 }
 
@@ -15,12 +15,13 @@ export function buildWhispers(
   items: WhisperItem[],
   totalPlat: number,
 ): string[] {
-  const tokens = items.map((i) =>
-    i.quantity > 1 ? `${i.item_name} x${i.quantity}` : i.item_name,
-  );
+  const tokens = items.map((i) => {
+    const qty = i.quantity > 1 ? ` x${i.quantity}` : "";
+    return `${i.item_name}${qty} ${i.price}p`;
+  });
   const firstPrefix = `/w ${sellerName} Hi! WTB: `;
   const contPrefix = `/w ${sellerName} + `;
-  const suffix = ` for ${totalPlat}p (warframe.market)`;
+  const suffix = ` for ${totalPlat}p total (warframe.market)`;
 
   const messages: string[] = [];
   let current = firstPrefix;

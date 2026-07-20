@@ -308,8 +308,8 @@ export async function getBundles(): Promise<BundleSeller[]> {
   const results: BundleSeller[] = [];
   for (const [seller_name, items] of sellerItems) {
     if (items.length < 2) continue;
-    const total_ducats = items.reduce((s, i) => s + i.ducats, 0);
-    const total_plat = items.reduce((s, i) => s + i.price, 0);
+    const total_ducats = items.reduce((s, i) => s + i.ducats * i.quantity, 0);
+    const total_plat = items.reduce((s, i) => s + i.price * i.quantity, 0);
     const combined_ppd = total_plat > 0 ? total_ducats / total_plat : 0;
     results.push({ seller_name, items, total_ducats, total_plat, combined_ppd });
   }

@@ -290,8 +290,8 @@ export async function GET() {
     for (const [seller_name, items] of sellerItems) {
       if (items.length < 2) continue;
       items.sort((a, b) => b.ducats / b.price - a.ducats / a.price);
-      const total_ducats = items.reduce((s, i) => s + i.ducats, 0);
-      const total_plat = items.reduce((s, i) => s + i.price, 0);
+      const total_ducats = items.reduce((s, i) => s + i.ducats * i.quantity, 0);
+      const total_plat = items.reduce((s, i) => s + i.price * i.quantity, 0);
       const combined_ppd = total_plat > 0 ? total_ducats / total_plat : 0;
       bundles.push({ seller_name, items, total_ducats, total_plat, combined_ppd });
     }
