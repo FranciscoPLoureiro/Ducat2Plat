@@ -241,10 +241,29 @@ export interface BundleSeller {
     ducats: number;
     price: number;
     quantity: number;
+    slots: number; // trade slots this listing occupies (set = part count; else 1)
   }[];
   total_ducats: number;
   total_plat: number;
   combined_ppd: number;
+}
+
+// A Prime set trades as its individual parts, so it costs (part count) trade
+// slots. Derive each set's part count from sibling url_names: parts of
+// `x_prime_set` are the non-set items whose url_name starts with `x_prime_`.
+// Parts (and anything without siblings) default to 1 slot.
+export function computeSetSlots(urlNames: string[]): Map<string, number> {
+  const slots = new Map<string, number>();
+  for (const u of urlNames) {
+    if (!u.endsWith("_set")) continue;
+    const prefix = u.slice(0, -4) + "_";
+    let count = 0;
+    for (const x of urlNames) {
+      if (x !== u && !x.endsWith("_set") && x.startsWith(prefix)) count++;
+    }
+    if (count > 1) slots.set(u, count);
+  }
+  return slots;
 }
 
 export async function getBundles(): Promise<BundleSeller[]> {
@@ -269,6 +288,17 @@ export async function getBundles(): Promise<BundleSeller[]> {
   );
 
   if (!orders.length) return [];
+
+  // All junk url_names, to derive set part-counts (a set spans several trades).
+  const allJunk = await fetchAll<{ url_name: string }>((from, to) =>
+    db
+      .from("prime_items")
+      .select("url_name")
+      .not("ducats", "is", null)
+      .order("url_name", { ascending: true })
+      .range(from, to),
+  );
+  const setSlots = computeSetSlots(allJunk.map((j) => j.url_name));
 
   const itemIds = [...new Set(orders.map((o) => o.item_id))];
 
@@ -301,6 +331,7 @@ export async function getBundles(): Promise<BundleSeller[]> {
         ducats: item.ducats,
         price: o.price,
         quantity: o.quantity,
+        slots: setSlots.get(item.url_name) ?? 1,
       });
     }
   }

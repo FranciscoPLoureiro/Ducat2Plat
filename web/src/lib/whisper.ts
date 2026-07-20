@@ -1,9 +1,10 @@
-// An in-game trade holds at most 6 items (each unit of a stacked listing counts
-// as one), so a large basket spans several trades. We partition the basket into
-// trades — highest ducat value first, so the *last* trade holds the least-
-// valuable leftovers — and the whisper emits one labeled message per trade so
-// the seller (and you) know exactly what each trade should contain. A partial
-// last trade (< 6 items) is flagged so you can decide whether it's worth a slot.
+// An in-game trade holds at most 6 items. A Prime *set* is one market listing
+// but trades as its individual parts, so it occupies (part count) slots, not 1
+// — a warframe set eats 4 of the 6 slots, a bow set 5. We pack the basket into
+// trades accounting for that, highest ducat value first, so the last trade
+// holds the least-valuable leftovers. Each whisper message names one trade so
+// the seller knows exactly what it should contain — and sets are shown as
+// "(N parts)" so it's clear you want the whole set.
 export const TRADE_SIZE = 6;
 // Warframe caps a chat message near ~180 chars; a trade that would exceed it is
 // split into continuation messages.
@@ -14,25 +15,32 @@ export interface WhisperItem {
   ducats: number;
   price: number;
   quantity: number;
+  slots?: number; // trade slots one unit occupies (set = part count; else 1)
 }
 
 export interface Trade {
-  items: WhisperItem[]; // aggregated; quantity = units of that item IN THIS trade
-  units: number; // total item slots this trade uses (1..TRADE_SIZE)
+  items: WhisperItem[]; // aggregated; quantity = units of that item in THIS trade
+  slots: number; // total trade slots used (1..TRADE_SIZE)
   ducatTotal: number;
   platTotal: number;
-  partial: boolean; // last trade with fewer than TRADE_SIZE units (and >1 trade)
+  partial: boolean; // last trade using fewer than TRADE_SIZE slots (and >1 trade)
+}
+
+function slotsOf(i: WhisperItem): number {
+  return i.slots && i.slots > 0 ? i.slots : 1;
 }
 
 export function partitionIntoTrades(items: WhisperItem[]): Trade[] {
-  // Expand each listing into individual units (a qty-3 listing = 3 slots).
-  const units: { item_name: string; ducats: number; price: number }[] = [];
+  // Expand listings into individual units (a qty-3 listing = 3 units), each
+  // carrying its slot cost.
+  const units: { item_name: string; ducats: number; price: number; slots: number }[] = [];
   for (const it of items) {
+    const s = slotsOf(it);
     for (let i = 0; i < it.quantity; i++) {
-      units.push({ item_name: it.item_name, ducats: it.ducats, price: it.price });
+      units.push({ item_name: it.item_name, ducats: it.ducats, price: it.price, slots: s });
     }
   }
-  // Highest ducat value first; cheaper plat breaks ties, then name for stability.
+  // Highest ducat value first; cheaper plat and name break ties for stability.
   units.sort(
     (a, b) =>
       b.ducats - a.ducats ||
@@ -40,33 +48,61 @@ export function partitionIntoTrades(items: WhisperItem[]): Trade[] {
       a.item_name.localeCompare(b.item_name),
   );
 
-  const trades: Trade[] = [];
-  for (let i = 0; i < units.length; i += TRADE_SIZE) {
-    const chunk = units.slice(i, i + TRADE_SIZE);
+  // First-fit-decreasing bin packing into trades of TRADE_SIZE slots — minimises
+  // the number of trades (the scarce resource) while keeping high-value items in
+  // the earliest trades and the skippable leftovers in the last.
+  const bins: { units: typeof units; slots: number }[] = [];
+  for (const u of units) {
+    let placed = false;
+    for (const b of bins) {
+      if (b.slots + u.slots <= TRADE_SIZE) {
+        b.units.push(u);
+        b.slots += u.slots;
+        placed = true;
+        break;
+      }
+    }
+    if (!placed) bins.push({ units: [u], slots: u.slots });
+  }
+
+  const trades: Trade[] = bins.map((b) => {
     const agg = new Map<string, WhisperItem>();
-    for (const u of chunk) {
+    for (const u of b.units) {
       const key = `${u.item_name}|${u.price}`;
       const existing = agg.get(key);
       if (existing) existing.quantity++;
-      else agg.set(key, { item_name: u.item_name, ducats: u.ducats, price: u.price, quantity: 1 });
+      else
+        agg.set(key, {
+          item_name: u.item_name,
+          ducats: u.ducats,
+          price: u.price,
+          quantity: 1,
+          slots: u.slots,
+        });
     }
-    trades.push({
-      items: [...agg.values()],
-      units: chunk.length,
-      ducatTotal: chunk.reduce((s, u) => s + u.ducats, 0),
-      platTotal: chunk.reduce((s, u) => s + u.price, 0),
+    const items = [...agg.values()].sort(
+      (a, b) => b.ducats - a.ducats || a.item_name.localeCompare(b.item_name),
+    );
+    return {
+      items,
+      slots: b.slots,
+      ducatTotal: b.units.reduce((s, u) => s + u.ducats, 0),
+      platTotal: b.units.reduce((s, u) => s + u.price, 0),
       partial: false,
-    });
-  }
-  if (trades.length > 1 && trades[trades.length - 1].units < TRADE_SIZE) {
+    };
+  });
+
+  if (trades.length > 1 && trades[trades.length - 1].slots < TRADE_SIZE) {
     trades[trades.length - 1].partial = true;
   }
   return trades;
 }
 
 function tokenFor(i: WhisperItem): string {
+  const s = slotsOf(i);
+  const setNote = s > 1 ? ` (${s} parts)` : "";
   const qty = i.quantity > 1 ? ` x${i.quantity}` : "";
-  return `${i.item_name}${qty} ${i.price}p`;
+  return `${i.item_name}${setNote}${qty} ${i.price}p`;
 }
 
 export function buildWhispers(

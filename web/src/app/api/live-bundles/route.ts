@@ -1,4 +1,4 @@
-import { getLatestSweepId, fetchAll, type BundleSeller } from "@/lib/data";
+import { getLatestSweepId, fetchAll, computeSetSlots, type BundleSeller } from "@/lib/data";
 import { getSupabase } from "@/lib/supabase";
 
 // On-demand fresh bundles, two-stage:
@@ -21,7 +21,7 @@ const STAGE1_ITEMS = 80;
 const STAGE2_SELLERS = 30;
 // Per-item basket filter: only "good ducat value" listings enter a bundle.
 // PpD >= 7.5 means a 45d part at <=6p; overpriced inventory is invisible.
-const MIN_ITEM_PPD = 7.5;
+const MIN_ITEM_PPD = 10;
 // And never pay far above the going rate even if PpD clears the floor.
 const MAX_OVER_MEDIAN = 1.5;
 const DEADLINE_MS = 50_000; // leave headroom under maxDuration
@@ -36,6 +36,7 @@ interface JunkItem {
   item_name: string;
   ducats: number;
   median: number | null;
+  slots: number;
 }
 
 function passesFilter(item: JunkItem, price: number): boolean {
@@ -182,6 +183,7 @@ export async function GET() {
     const ppdById = new Map<string, number>();
     for (const r of rankRows) ppdById.set(r.item_id, Number(r.ppd));
 
+    const setSlots = computeSetSlots(junkRows.map((j) => j.url_name));
     const junkById = new Map<string, JunkItem>();
     const junkByWfm = new Map<string, JunkItem>();
     for (const j of junkRows) {
@@ -192,6 +194,7 @@ export async function GET() {
         item_name: j.item_name,
         ducats: j.ducats,
         median,
+        slots: setSlots.get(j.url_name) ?? 1,
       };
       junkById.set(j.id, entry);
       junkByWfm.set(j.wfm_id, entry);
@@ -233,6 +236,7 @@ export async function GET() {
             ducats: item.ducats,
             price: s.price,
             quantity: s.quantity,
+            slots: item.slots,
           });
         }
       }
@@ -281,6 +285,7 @@ export async function GET() {
             ducats: item.ducats,
             price: s.price,
             quantity: s.quantity,
+            slots: item.slots,
           });
         }
       }

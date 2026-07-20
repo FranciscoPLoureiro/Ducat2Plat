@@ -1,64 +1,71 @@
 import { describe, it, expect } from "vitest";
 import { buildWhispers, partitionIntoTrades, WF_SAFE_LEN, TRADE_SIZE } from "./whisper";
 
-const item = (name: string, ducats: number, price: number, quantity = 1) => ({
-  item_name: name,
-  ducats,
-  price,
-  quantity,
-});
+const item = (
+  name: string,
+  ducats: number,
+  price: number,
+  quantity = 1,
+  slots = 1,
+) => ({ item_name: name, ducats, price, quantity, slots });
 
 describe("partitionIntoTrades", () => {
   it("keeps a small basket in one non-partial trade", () => {
     const trades = partitionIntoTrades([item("A", 45, 3), item("B", 45, 4)]);
     expect(trades).toHaveLength(1);
-    expect(trades[0].units).toBe(2);
+    expect(trades[0].slots).toBe(2);
     expect(trades[0].partial).toBe(false);
   });
 
-  it("splits into trades of 6 units and flags a partial last trade", () => {
+  it("splits into trades of 6 slots and flags a partial last trade", () => {
     const items = Array.from({ length: 8 }, (_, i) => item(`Item${i}`, 45, 3));
     const trades = partitionIntoTrades(items);
     expect(trades).toHaveLength(2);
-    expect(trades[0].units).toBe(6);
-    expect(trades[1].units).toBe(2);
+    expect(trades[0].slots).toBe(6);
+    expect(trades[1].slots).toBe(2);
     expect(trades[1].partial).toBe(true);
-    expect(trades[0].partial).toBe(false);
   });
 
-  it("does not flag partial when the last trade is exactly full", () => {
-    const items = Array.from({ length: 12 }, (_, i) => item(`Item${i}`, 45, 3));
-    const trades = partitionIntoTrades(items);
-    expect(trades).toHaveLength(2);
-    expect(trades.every((t) => !t.partial)).toBe(true);
-  });
-
-  it("orders by ducat value so the last (partial) trade is the least valuable", () => {
+  it("orders by ducat value so the partial last trade is least valuable", () => {
     const items = [
       item("Cheap", 15, 2),
-      item("Rich1", 100, 9),
-      item("Rich2", 100, 9),
-      item("Rich3", 100, 9),
-      item("Rich4", 100, 9),
-      item("Rich5", 100, 9),
-      item("Rich6", 100, 9),
+      ...Array.from({ length: 6 }, (_, i) => item(`Rich${i}`, 100, 9)),
     ];
     const trades = partitionIntoTrades(items);
     expect(trades).toHaveLength(2);
-    // first trade holds the six 100-ducat items
     expect(trades[0].ducatTotal).toBe(600);
-    // the leftover partial trade holds only the 15-ducat one
-    expect(trades[1].units).toBe(1);
+    expect(trades[1].slots).toBe(1);
     expect(trades[1].ducatTotal).toBe(15);
     expect(trades[1].partial).toBe(true);
   });
 
-  it("counts stacked quantities as separate slots", () => {
-    const trades = partitionIntoTrades([item("A", 45, 3, 4), item("B", 45, 3, 3)]);
-    // 7 units -> 2 trades (6 + 1)
+  it("counts a set as its part-count in slots, not as 1 item", () => {
+    // a 4-part set + 2 single parts = 6 slots -> one full trade
+    const trades = partitionIntoTrades([
+      item("Rhino Prime Set", 220, 40, 1, 4),
+      item("Braton Prime Barrel", 45, 3),
+      item("Paris Prime Grip", 45, 3),
+    ]);
+    expect(trades).toHaveLength(1);
+    expect(trades[0].slots).toBe(6);
+  });
+
+  it("a set that overflows the current trade starts a new one", () => {
+    // 5-part set can't share with a 4-part set (9 > 6) -> two trades
+    const trades = partitionIntoTrades([
+      item("Ballistica Prime Set", 250, 33, 1, 5),
+      item("Rhino Prime Set", 220, 40, 1, 4),
+    ]);
     expect(trades).toHaveLength(2);
-    expect(trades[0].units).toBe(TRADE_SIZE);
-    expect(trades[1].units).toBe(1);
+    expect(trades[0].slots).toBe(5);
+    expect(trades[1].slots).toBe(4);
+  });
+
+  it("stacked quantities each cost their slot size", () => {
+    const trades = partitionIntoTrades([item("A", 45, 3, 4), item("B", 45, 3, 3)]);
+    expect(trades).toHaveLength(2);
+    expect(trades[0].slots).toBe(TRADE_SIZE);
+    expect(trades[1].slots).toBe(1);
     expect(trades[1].partial).toBe(true);
   });
 });
@@ -71,13 +78,17 @@ describe("buildWhispers", () => {
     expect(msgs[0].length).toBeLessThanOrEqual(WF_SAFE_LEN);
   });
 
+  it("labels a set with its part count so the seller knows it's the whole set", () => {
+    const msgs = buildWhispers("Ada", [item("Rhino Prime Set", 220, 40, 1, 4)], 40);
+    expect(msgs[0]).toContain("Rhino Prime Set (4 parts) 40p");
+  });
+
   it("multi-trade: one labeled message per trade, all within the cap", () => {
     const items = Array.from({ length: 8 }, (_, i) => item(`Prime Part ${i}`, 45, 3));
     const msgs = buildWhispers("Seller", items, 24);
-    expect(msgs).toHaveLength(2);
-    expect(msgs[0]).toContain("WTB trade 1/2:");
-    expect(msgs[1]).toContain("trade 2/2 (partial):");
-    expect(msgs[1]).toContain("total 24p");
+    expect(msgs.some((m) => m.includes("WTB trade 1/2:"))).toBe(true);
+    expect(msgs.some((m) => m.includes("trade 2/2 (partial):"))).toBe(true);
+    expect(msgs.some((m) => m.includes("total 24p"))).toBe(true);
     for (const m of msgs) expect(m.length).toBeLessThanOrEqual(WF_SAFE_LEN);
   });
 

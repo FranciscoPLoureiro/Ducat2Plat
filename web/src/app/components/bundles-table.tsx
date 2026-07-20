@@ -87,7 +87,7 @@ export default function BundlesTable({ bundles }: { bundles: BundleSeller[] }) {
             <tr className="border-b border-zinc-700 text-zinc-400 text-left">
               <th className="py-2 px-3 font-medium">#</th>
               <th className="py-2 px-3 font-medium" title="warframe.market seller (in-game at sweep time). Click the name to open their profile.">Seller</th>
-              <th className="py-2 px-3 font-medium text-right" title="Total items this seller offers in this bundle — one trade holds up to 6">Items</th>
+              <th className="py-2 px-3 font-medium text-right" title="Trade slots this basket needs — one trade holds 6, and a set costs one slot per part. Expand for the per-trade breakdown.">Slots</th>
               <th className="py-2 px-3 font-medium text-right" title="Ducat value of buying the whole basket">Total Ducats</th>
               <th className="py-2 px-3 font-medium text-right" title="Plat cost of the whole basket at listed prices">Total Plat</th>
               <th className="py-2 px-3 font-medium text-right" title="Ducats per plat for the whole basket — higher is better">Combined PpD</th>
@@ -171,7 +171,12 @@ function SellerRow({
             {bundle.seller_name}
           </a>
         </td>
-        <td className="py-2 px-3 text-right">{bundle.items.reduce((s, i) => s + i.quantity, 0)}</td>
+        <td className="py-2 px-3 text-right whitespace-nowrap">
+          {trades.reduce((s, t) => s + t.slots, 0)}
+          {trades.length > 1 && (
+            <span className="text-zinc-500"> · {trades.length} trades</span>
+          )}
+        </td>
         <td className="py-2 px-3 text-right text-amber-400">
           {bundle.total_ducats}
         </td>
@@ -235,8 +240,8 @@ function SellerRow({
           <td colSpan={7} className="px-6 py-3">
             {trades.length > 1 && (
               <p className="text-xs text-zinc-500 mb-2">
-                {trades.length} in-game trades needed (6 items each), highest ducat
-                value first.
+                {trades.length} in-game trades needed (6 slots each; a set uses one
+                slot per part), highest ducat value first.
               </p>
             )}
             <div className="space-y-3">
@@ -252,14 +257,14 @@ function SellerRow({
                         Trade {ti + 1}/{trades.length}
                         {trade.partial && (
                           <span className="ml-1 font-normal">
-                            — only {trade.units} item{trade.units === 1 ? "" : "s"},
-                            worth {trade.ducatTotal}d. A full trade slot for little
-                            value — consider skipping.
+                            — only {trade.slots} slot{trade.slots === 1 ? "" : "s"},
+                            worth {trade.ducatTotal}d. A whole trade for little value —
+                            consider skipping.
                           </span>
                         )}
                       </span>
                       <span className="text-zinc-500">
-                        {trade.units}/6 slots · {trade.ducatTotal}d · {trade.platTotal}p
+                        {trade.slots}/6 slots · {trade.ducatTotal}d · {trade.platTotal}p
                       </span>
                     </div>
                   )}
@@ -267,7 +272,14 @@ function SellerRow({
                     <tbody>
                       {trade.items.map((item, ii) => (
                         <tr key={`${ti}-${ii}`} className="border-b border-zinc-800/50">
-                          <td className="py-1 px-2 text-zinc-300">{item.item_name}</td>
+                          <td className="py-1 px-2 text-zinc-300">
+                            {item.item_name}
+                            {item.slots && item.slots > 1 && (
+                              <span className="ml-1 text-sky-400">
+                                (set · {item.slots} parts)
+                              </span>
+                            )}
+                          </td>
                           <td className="py-1 px-2 text-right text-amber-400 w-16">
                             {item.ducats}d
                           </td>
