@@ -248,9 +248,9 @@ async function fetchOrderDepth(
   // at <=6p), capped. A fixed top-60 made bundles blind to the long tail of
   // decent junk that sellers actually hold. Floor of 60 keeps thin markets
   // covered.
-  // Cap sized so the floor is the binding constraint (currently ~161 items
-  // clear the floor); it exists only as a runaway guard if the market shifts.
-  const PPD_FLOOR = 7.5;
+  // Cap sized so the floor is the binding constraint (~85 items clear 10.0);
+  // it exists only as a runaway guard if the market shifts.
+  const PPD_FLOOR = 10;
   const CANDIDATE_CAP = 175;
   const aboveFloor = ppds.filter((p) => p.ppd >= PPD_FLOOR);
   const candidates = (aboveFloor.length >= 60 ? aboveFloor : ppds).slice(

@@ -131,7 +131,17 @@ export default function DucatPlanner({ items }: { items: RankedItem[] }) {
   const [ducatsHave, setDucatsHave] = useState(() => readStoredNumber(LS_KEY_HAVE));
   const [ducatsNeed, setDucatsNeed] = useState(() => readStoredNumber(LS_KEY_NEED));
   const [copied, setCopied] = useState<string | null>(null);
+  const [whisperOpen, setWhisperOpen] = useState<Set<string>>(new Set());
   const settings = useSettings();
+
+  function toggleWhisper(seller: string) {
+    setWhisperOpen((prev) => {
+      const next = new Set(prev);
+      if (next.has(seller)) next.delete(seller);
+      else next.add(seller);
+      return next;
+    });
+  }
 
   const updateHave = useCallback((v: number) => {
     setDucatsHave(v);
@@ -260,27 +270,63 @@ export default function DucatPlanner({ items }: { items: RankedItem[] }) {
                           {group.total_plat}p · {group.total_ducats} ducats
                         </span>
                       </div>
-                      <span
-                        className="inline-flex gap-1"
-                        title="Split into parts when over Warframe's chat length cap — send in order"
-                      >
-                        {buildWhispers(group.seller_name, group.purchases, group.total_plat).map(
-                          (_, part, arr) => (
+                      {(() => {
+                        const parts = buildWhispers(
+                          group.seller_name,
+                          group.purchases,
+                          group.total_plat,
+                        );
+                        if (parts.length === 1) {
+                          return (
                             <button
-                              key={part}
-                              onClick={() => copyWhisper(group, part)}
+                              onClick={() => copyWhisper(group, 0)}
                               className="px-2.5 py-1 rounded text-xs bg-zinc-800 border border-zinc-700 hover:bg-zinc-700 transition-colors text-zinc-300 whitespace-nowrap"
                             >
-                              {copied === `${group.seller_name}#${part}`
-                                ? "✓"
-                                : arr.length === 1
-                                  ? "Copy /w"
-                                  : `/w ${part + 1}/${arr.length}`}
+                              {copied === `${group.seller_name}#0` ? "Copied!" : "Copy /w"}
                             </button>
-                          ),
-                        )}
-                      </span>
+                          );
+                        }
+                        return (
+                          <button
+                            onClick={() => toggleWhisper(group.seller_name)}
+                            title={`Message split into ${parts.length} parts (Warframe chat length cap) — click to open`}
+                            className={`px-2.5 py-1 rounded text-xs border transition-colors whitespace-nowrap ${
+                              whisperOpen.has(group.seller_name)
+                                ? "border-emerald-700 text-emerald-300 bg-emerald-950/40"
+                                : "bg-zinc-800 border-zinc-700 hover:bg-zinc-700 text-zinc-300"
+                            }`}
+                          >
+                            Copy /w ({parts.length}) {whisperOpen.has(group.seller_name) ? "▲" : "▾"}
+                          </button>
+                        );
+                      })()}
                     </div>
+                    {whisperOpen.has(group.seller_name) && (
+                      <div className="px-3 py-2 bg-zinc-900/70 border-t border-zinc-800">
+                        <p className="text-xs text-zinc-500 mb-1.5">
+                          Warframe caps message length — send these in order:
+                        </p>
+                        <div className="space-y-1.5">
+                          {buildWhispers(
+                            group.seller_name,
+                            group.purchases,
+                            group.total_plat,
+                          ).map((msg, part, arr) => (
+                            <div key={part} className="flex items-center gap-2">
+                              <button
+                                onClick={() => copyWhisper(group, part)}
+                                className="shrink-0 w-24 px-2 py-1 rounded text-xs border border-zinc-700 text-zinc-300 hover:text-zinc-100 hover:bg-zinc-800 transition-colors"
+                              >
+                                {copied === `${group.seller_name}#${part}`
+                                  ? "✓ Copied"
+                                  : `Copy ${part + 1}/${arr.length}`}
+                              </button>
+                              <code className="text-[11px] text-zinc-500 truncate">{msg}</code>
+                            </div>
+                          ))}
+                        </div>
+                      </div>
+                    )}
                     <div className="overflow-x-auto">
                       <table className="w-full text-xs">
                         <thead>

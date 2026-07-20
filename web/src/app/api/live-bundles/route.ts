@@ -20,8 +20,8 @@ const RATE_MS = 340; // ~2.9 req/s launch spacing, under WFM's 3/s
 const STAGE1_ITEMS = 80;
 const STAGE2_SELLERS = 30;
 // Per-item basket filter: only "good ducat value" listings enter a bundle.
-// PpD >= 5 means a 45d part at <=9p; overpriced inventory is invisible.
-const MIN_ITEM_PPD = 5;
+// PpD >= 7.5 means a 45d part at <=6p; overpriced inventory is invisible.
+const MIN_ITEM_PPD = 7.5;
 // And never pay far above the going rate even if PpD clears the floor.
 const MAX_OVER_MEDIAN = 1.5;
 const DEADLINE_MS = 50_000; // leave headroom under maxDuration

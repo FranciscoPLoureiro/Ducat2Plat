@@ -11,7 +11,17 @@ export default function BundlesTable({ bundles }: { bundles: BundleSeller[] }) {
   const [showAll, setShowAll] = useState(false);
   const [minDucats, setMinDucats] = useState(135);
   const [copied, setCopied] = useState<string | null>(null);
+  const [whisperOpen, setWhisperOpen] = useState<Set<string>>(new Set());
   const settings = useSettings();
+
+  function toggleWhisper(seller: string) {
+    setWhisperOpen((prev) => {
+      const next = new Set(prev);
+      if (next.has(seller)) next.delete(seller);
+      else next.add(seller);
+      return next;
+    });
+  }
 
   function toggle(seller: string) {
     setExpanded((prev) => {
@@ -98,6 +108,8 @@ export default function BundlesTable({ bundles }: { bundles: BundleSeller[] }) {
                     ? Number(copied.split("#")[1])
                     : null
                 }
+                whisperOpen={whisperOpen.has(b.seller_name)}
+                onToggleWhisper={() => toggleWhisper(b.seller_name)}
               />
             ))}
             {filtered.length === 0 && (
@@ -123,6 +135,8 @@ function SellerRow({
   onToggle,
   onCopy,
   copiedPart,
+  whisperOpen,
+  onToggleWhisper,
 }: {
   bundle: BundleSeller;
   rank: number;
@@ -130,12 +144,10 @@ function SellerRow({
   onToggle: () => void;
   onCopy: (part: number) => void;
   copiedPart: number | null;
+  whisperOpen: boolean;
+  onToggleWhisper: () => void;
 }) {
-  const partCount = buildWhispers(
-    bundle.seller_name,
-    bundle.items,
-    bundle.total_plat,
-  ).length;
+  const parts = buildWhispers(bundle.seller_name, bundle.items, bundle.total_plat);
 
   return (
     <>
@@ -167,7 +179,7 @@ function SellerRow({
           {bundle.combined_ppd.toFixed(1)}
         </td>
         <td className="py-2 px-3 text-right whitespace-nowrap">
-          {partCount === 1 ? (
+          {parts.length === 1 ? (
             <button
               onClick={(e) => {
                 e.stopPropagation();
@@ -178,26 +190,45 @@ function SellerRow({
               {copiedPart === 0 ? "Copied!" : "Copy /w"}
             </button>
           ) : (
-            <span
-              className="inline-flex gap-1"
-              title={`Message split into ${partCount} parts (Warframe chat length cap) — send in order`}
+            <button
+              onClick={(e) => {
+                e.stopPropagation();
+                onToggleWhisper();
+              }}
+              title={`Message split into ${parts.length} parts (Warframe chat length cap) — click to open`}
+              className={`px-2 py-1 rounded text-xs border transition-colors ${
+                whisperOpen
+                  ? "border-emerald-700 text-emerald-300 bg-emerald-950/40"
+                  : "border-zinc-700 text-zinc-400 hover:text-zinc-100 hover:bg-zinc-800"
+              }`}
             >
-              {Array.from({ length: partCount }, (_, part) => (
-                <button
-                  key={part}
-                  onClick={(e) => {
-                    e.stopPropagation();
-                    onCopy(part);
-                  }}
-                  className="px-2 py-1 rounded text-xs border border-zinc-700 text-zinc-400 hover:text-zinc-100 hover:bg-zinc-800 transition-colors"
-                >
-                  {copiedPart === part ? "✓" : `/w ${part + 1}/${partCount}`}
-                </button>
-              ))}
-            </span>
+              Copy /w ({parts.length}) {whisperOpen ? "▲" : "▾"}
+            </button>
           )}
         </td>
       </tr>
+      {whisperOpen && parts.length > 1 && (
+        <tr className="bg-zinc-900/60">
+          <td colSpan={7} className="px-6 py-3">
+            <p className="text-xs text-zinc-500 mb-2">
+              Warframe caps message length — send these in order:
+            </p>
+            <div className="space-y-1.5">
+              {parts.map((msg, part) => (
+                <div key={part} className="flex items-center gap-2">
+                  <button
+                    onClick={() => onCopy(part)}
+                    className="shrink-0 w-24 px-2 py-1 rounded text-xs border border-zinc-700 text-zinc-300 hover:text-zinc-100 hover:bg-zinc-800 transition-colors"
+                  >
+                    {copiedPart === part ? "✓ Copied" : `Copy ${part + 1}/${parts.length}`}
+                  </button>
+                  <code className="text-[11px] text-zinc-500 truncate">{msg}</code>
+                </div>
+              ))}
+            </div>
+          </td>
+        </tr>
+      )}
       {isExpanded && (
         <tr className="bg-zinc-900/50">
           <td colSpan={7} className="px-6 py-3">
