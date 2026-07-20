@@ -108,9 +108,9 @@ export default function PositionsTable({
                   </a>
                 </td>
                 <td className="py-2 px-3 text-right">{p.qty}</td>
-                <td className="py-2 px-3 text-right text-amber-400">{p.cost_ducats}</td>
+                <td className="py-2 px-3 text-right text-amber-400">{p.cost_ducats * p.qty}</td>
                 <td className="py-2 px-3 text-right font-mono text-zinc-400">
-                  {Math.round(costPlat)}p
+                  {Math.round(costPlat * p.qty)}p
                 </td>
                 <td className="py-2 px-3 text-right font-mono">
                   {showClose

@@ -84,7 +84,6 @@ function planPurchases(
     const existing = consolidated.get(key);
     if (existing) {
       existing.quantity += 1;
-      existing.ducats += p.ducats;
     } else {
       consolidated.set(key, { ...p });
     }
@@ -106,7 +105,7 @@ function groupBySeller(purchases: PlannedPurchase[]): SellerGroup[] {
       seller_name,
       purchases: pList,
       total_plat: pList.reduce((s, p) => s + p.price * p.quantity, 0),
-      total_ducats: pList.reduce((s, p) => s + p.ducats, 0),
+      total_ducats: pList.reduce((s, p) => s + p.ducats * p.quantity, 0),
     });
   }
 
@@ -159,9 +158,11 @@ export default function DucatPlanner({ items }: { items: RankedItem[] }) {
     if (shortfall <= 0) return { purchases: [], sellerGroups: [], totalPlat: 0, totalDucats: 0 };
     const p = planPurchases(items, shortfall);
     const sg = groupBySeller(p);
+    const totalPurchases = p.reduce((sum, item) => sum + item.quantity, 0);
     return {
       purchases: p,
       sellerGroups: sg,
+      totalPurchases,
       totalPlat: sg.reduce((s, g) => s + g.total_plat, 0),
       totalDucats: sg.reduce((s, g) => s + g.total_ducats, 0),
     };
@@ -247,7 +248,7 @@ export default function DucatPlanner({ items }: { items: RankedItem[] }) {
                   <span className="text-amber-400 font-semibold">{totalDucats} ducats</span>
                 </span>
                 <span className="text-zinc-500">
-                  ({purchases.length} purchase{purchases.length !== 1 ? "s" : ""} from{" "}
+                  ({totalPurchases} item{totalPurchases !== 1 ? "s" : ""} from{" "}
                   {sellerGroups.length} seller{sellerGroups.length !== 1 ? "s" : ""})
                 </span>
                 {settings.masteryRank !== null && (
@@ -342,9 +343,9 @@ export default function DucatPlanner({ items }: { items: RankedItem[] }) {
                             <tr key={i} className="border-b border-zinc-800/50">
                               <td className="py-1 px-3 text-zinc-300">{p.item_name}</td>
                               <td className="py-1 px-3 text-right text-amber-400">
-                                {p.ducats}
+                                {p.ducats * p.quantity}
                               </td>
-                              <td className="py-1 px-3 text-right">{p.price}p</td>
+                              <td className="py-1 px-3 text-right">{p.price * p.quantity}p</td>
                               <td className="py-1 px-3 text-right">{p.quantity}</td>
                             </tr>
                           ))}

@@ -87,7 +87,7 @@ export default function BundlesTable({ bundles }: { bundles: BundleSeller[] }) {
             <tr className="border-b border-zinc-700 text-zinc-400 text-left">
               <th className="py-2 px-3 font-medium">#</th>
               <th className="py-2 px-3 font-medium" title="warframe.market seller (in-game at sweep time). Click the name to open their profile.">Seller</th>
-              <th className="py-2 px-3 font-medium text-right" title="Distinct candidate items this seller offers — one trade holds up to 6">Items</th>
+              <th className="py-2 px-3 font-medium text-right" title="Total items this seller offers in this bundle — one trade holds up to 6">Items</th>
               <th className="py-2 px-3 font-medium text-right" title="Ducat value of buying the whole basket">Total Ducats</th>
               <th className="py-2 px-3 font-medium text-right" title="Plat cost of the whole basket at listed prices">Total Plat</th>
               <th className="py-2 px-3 font-medium text-right" title="Ducats per plat for the whole basket — higher is better">Combined PpD</th>
@@ -170,7 +170,7 @@ function SellerRow({
             {bundle.seller_name}
           </a>
         </td>
-        <td className="py-2 px-3 text-right">{bundle.items.length}</td>
+        <td className="py-2 px-3 text-right">{bundle.items.reduce((s, i) => s + i.quantity, 0)}</td>
         <td className="py-2 px-3 text-right text-amber-400">
           {bundle.total_ducats}
         </td>
