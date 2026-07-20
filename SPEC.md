@@ -30,7 +30,7 @@ justified — **build exactly what is written here, do not re-architect.**
 
 | Layer | Choice | Notes |
 |---|---|---|
-| Database | Supabase (Postgres), free tier | Service-role key used ONLY by the worker. Dashboard uses anon key + RLS read-only. |
+| Database | Supabase (Postgres), free tier | Service-role key used by the worker (unrestricted). **Deviation (2026-07-20):** also present as `SUPABASE_SERVICE_ROLE_KEY` in Vercel's server-only env, used exclusively by `/api/positions/*` route handlers (never sent to the client) to write the `positions` table for the M13 buy/close flow. All other reads go through the anon/publishable key + RLS read-only. |
 | Ingestion worker | Node.js (TypeScript) script, no framework | Single entry point `worker/sweep.ts`. |
 | Scheduler | GitHub Actions cron, once daily | With keepalive so the schedule never auto-disables (§7). |
 | Frontend | Next.js (App Router), deployed on Vercel free tier | Reads Supabase directly via anon key. |
