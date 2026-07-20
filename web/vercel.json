@@ -1,7 +1,3 @@
 {
-  "git": {
-    "deploymentEnabled": {
-      "keepalive": false
-    }
-  }
+  "ignoreCommand": "if [ \"$VERCEL_GIT_COMMIT_REF\" = \"keepalive\" ]; then exit 0; else exit 1; fi"
 }

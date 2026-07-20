@@ -104,12 +104,16 @@ jobs:
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
           git switch --orphan keepalive 2>/dev/null || git switch keepalive
-          # Vercel reads config from the branch it builds. An empty orphan
-          # branch has no web/vercel.json, so Vercel tried (and failed) to
-          # build it daily. Ship a minimal config on the branch itself that
-          # opts it out of deployments.
+          # Vercel reads vercel.json from the branch it builds and the project's
+          # root directory (web/). An Ignored Build Step that exits 0 on this
+          # branch makes Vercel cancel the build cleanly instead of failing on
+          # the empty orphan branch (which has no app to build).
           mkdir -p web
-          printf '{\n  "git": {\n    "deploymentEnabled": {\n      "keepalive": false\n    }\n  }\n}\n' > web/vercel.json
+          cat > web/vercel.json <<'JSON'
+          {
+            "ignoreCommand": "if [ \"$VERCEL_GIT_COMMIT_REF\" = \"keepalive\" ]; then exit 0; else exit 1; fi"
+          }
+          JSON
           git add web/vercel.json
           git commit -m "keepalive $(date -u +%Y-%m-%dT%H:%M:%SZ)"
           git push origin keepalive --force
