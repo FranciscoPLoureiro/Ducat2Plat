@@ -2,7 +2,7 @@
 // itemized whisper into a sequence of messages, each under the cap: the first
 // opens with the greeting, continuations are prefixed "+", and the total closes
 // the last one. The UI renders one copy button per part.
-export const WF_SAFE_LEN = 300;
+export const WF_SAFE_LEN = 180;
 
 export interface WhisperItem {
   item_name: string;
