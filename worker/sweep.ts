@@ -217,7 +217,12 @@ async function fetchOrderDepth(
       .select("item_id, median")
       .in("item_id", chunk)
       .eq("mod_rank", -1)
-      .order("stat_date", { ascending: false });
+      .gte(
+        "stat_date",
+        new Date(Date.now() - 14 * 86_400_000).toISOString().slice(0, 10),
+      )
+      .order("stat_date", { ascending: false })
+      .order("item_id", { ascending: true });
 
     if (statsRows) {
       const typed = statsRows as { item_id: string; median: number }[];
@@ -239,7 +244,17 @@ async function fetchOrderDepth(
   }
 
   ppds.sort((a, b) => b.ppd - a.ppd);
-  const candidates = ppds.slice(0, 60);
+  // Market-adaptive candidate set: everything above the PpD floor (a 45d part
+  // at <=6p), capped. A fixed top-60 made bundles blind to the long tail of
+  // decent junk that sellers actually hold. Floor of 60 keeps thin markets
+  // covered.
+  const PPD_FLOOR = 7.5;
+  const CANDIDATE_CAP = 150;
+  const aboveFloor = ppds.filter((p) => p.ppd >= PPD_FLOOR);
+  const candidates = (aboveFloor.length >= 60 ? aboveFloor : ppds).slice(
+    0,
+    CANDIDATE_CAP,
+  );
 
   console.log(`Fetching orders for ${candidates.length} top candidates`);
   let ok = 0;

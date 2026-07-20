@@ -3,7 +3,7 @@
 import { useMemo, useState } from "react";
 import type { BundleSeller } from "@/lib/data";
 import { useSettings } from "@/lib/settings";
-import { buildWhisper } from "@/lib/whisper";
+import { buildWhispers } from "@/lib/whisper";
 
 
 export default function BundlesTable({ bundles }: { bundles: BundleSeller[] }) {
@@ -22,12 +22,11 @@ export default function BundlesTable({ bundles }: { bundles: BundleSeller[] }) {
     });
   }
 
-  async function copyWhisper(bundle: BundleSeller) {
+  async function copyWhisper(bundle: BundleSeller, part: number) {
     try {
-      await navigator.clipboard.writeText(
-        buildWhisper(bundle.seller_name, bundle.items, bundle.total_plat),
-      );
-      setCopied(bundle.seller_name);
+      const parts = buildWhispers(bundle.seller_name, bundle.items, bundle.total_plat);
+      await navigator.clipboard.writeText(parts[part] ?? parts[0]);
+      setCopied(`${bundle.seller_name}#${part}`);
       setTimeout(() => setCopied(null), 2000);
     } catch {}
   }
@@ -93,8 +92,12 @@ export default function BundlesTable({ bundles }: { bundles: BundleSeller[] }) {
                 rank={i + 1}
                 isExpanded={expanded.has(b.seller_name)}
                 onToggle={() => toggle(b.seller_name)}
-                onCopy={() => copyWhisper(b)}
-                copied={copied === b.seller_name}
+                onCopy={(part) => copyWhisper(b, part)}
+                copiedPart={
+                  copied?.startsWith(`${b.seller_name}#`)
+                    ? Number(copied.split("#")[1])
+                    : null
+                }
               />
             ))}
             {filtered.length === 0 && (
@@ -119,15 +122,21 @@ function SellerRow({
   isExpanded,
   onToggle,
   onCopy,
-  copied,
+  copiedPart,
 }: {
   bundle: BundleSeller;
   rank: number;
   isExpanded: boolean;
   onToggle: () => void;
-  onCopy: () => void;
-  copied: boolean;
+  onCopy: (part: number) => void;
+  copiedPart: number | null;
 }) {
+  const partCount = buildWhispers(
+    bundle.seller_name,
+    bundle.items,
+    bundle.total_plat,
+  ).length;
+
   return (
     <>
       <tr
@@ -157,16 +166,36 @@ function SellerRow({
         <td className="py-2 px-3 text-right font-bold text-emerald-400">
           {bundle.combined_ppd.toFixed(1)}
         </td>
-        <td className="py-2 px-3 text-right">
-          <button
-            onClick={(e) => {
-              e.stopPropagation();
-              onCopy();
-            }}
-            className="px-2 py-1 rounded text-xs border border-zinc-700 text-zinc-400 hover:text-zinc-100 hover:bg-zinc-800 transition-colors"
-          >
-            {copied ? "Copied!" : "Copy /w"}
-          </button>
+        <td className="py-2 px-3 text-right whitespace-nowrap">
+          {partCount === 1 ? (
+            <button
+              onClick={(e) => {
+                e.stopPropagation();
+                onCopy(0);
+              }}
+              className="px-2 py-1 rounded text-xs border border-zinc-700 text-zinc-400 hover:text-zinc-100 hover:bg-zinc-800 transition-colors"
+            >
+              {copiedPart === 0 ? "Copied!" : "Copy /w"}
+            </button>
+          ) : (
+            <span
+              className="inline-flex gap-1"
+              title={`Message split into ${partCount} parts (Warframe chat length cap) — send in order`}
+            >
+              {Array.from({ length: partCount }, (_, part) => (
+                <button
+                  key={part}
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    onCopy(part);
+                  }}
+                  className="px-2 py-1 rounded text-xs border border-zinc-700 text-zinc-400 hover:text-zinc-100 hover:bg-zinc-800 transition-colors"
+                >
+                  {copiedPart === part ? "✓" : `/w ${part + 1}/${partCount}`}
+                </button>
+              ))}
+            </span>
+          )}
         </td>
       </tr>
       {isExpanded && (

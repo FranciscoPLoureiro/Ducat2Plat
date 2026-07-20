@@ -9,7 +9,12 @@ const LS_KEY = "d2p_bundles_refreshed_at";
 
 export default function BundlesLive({ initial }: { initial: BundleSeller[] }) {
   const [bundles, setBundles] = useState(initial);
-  const [live, setLive] = useState<{ at: string; checked: number; failed: number } | null>(null);
+  const [live, setLive] = useState<{
+    at: string;
+    checked: number;
+    failed: number;
+    sellersCompleted: number;
+  } | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [cooldownLeft, setCooldownLeft] = useState(0);
@@ -43,7 +48,12 @@ export default function BundlesLive({ initial }: { initial: BundleSeller[] }) {
         return;
       }
       setBundles(data.bundles as BundleSeller[]);
-      setLive({ at: data.fetchedAt, checked: data.checked, failed: data.failed });
+      setLive({
+        at: data.fetchedAt,
+        checked: data.checked,
+        failed: data.failed,
+        sellersCompleted: data.sellersCompleted ?? 0,
+      });
       try {
         localStorage.setItem(LS_KEY, String(Date.now()));
       } catch {}
@@ -77,7 +87,10 @@ export default function BundlesLive({ initial }: { initial: BundleSeller[] }) {
             })}
             <span className="text-zinc-500">
               {" "}
-              · {live.checked} items checked{live.failed ? `, ${live.failed} failed` : ""}
+              · {live.checked} items checked
+              {live.sellersCompleted > 0 &&
+                `, ${live.sellersCompleted} sellers' full inventories scanned`}
+              {live.failed ? `, ${live.failed} failed` : ""}
             </span>
           </span>
         ) : (

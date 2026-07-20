@@ -3,7 +3,7 @@
 import { useState, useMemo, useCallback } from "react";
 import type { RankedItem } from "@/lib/data";
 import { useSettings, updateSettings } from "@/lib/settings";
-import { buildWhisper } from "@/lib/whisper";
+import { buildWhispers } from "@/lib/whisper";
 
 const LS_KEY_HAVE = "d2p_ducats_have";
 const LS_KEY_NEED = "d2p_ducats_need";
@@ -157,11 +157,11 @@ export default function DucatPlanner({ items }: { items: RankedItem[] }) {
     };
   }, [items, shortfall]);
 
-  async function copyWhisper(group: SellerGroup) {
-    const text = buildWhisper(group.seller_name, group.purchases, group.total_plat);
+  async function copyWhisper(group: SellerGroup, part: number) {
+    const parts = buildWhispers(group.seller_name, group.purchases, group.total_plat);
     try {
-      await navigator.clipboard.writeText(text);
-      setCopied(group.seller_name);
+      await navigator.clipboard.writeText(parts[part] ?? parts[0]);
+      setCopied(`${group.seller_name}#${part}`);
       setTimeout(() => setCopied(null), 2000);
     } catch {}
   }
@@ -260,12 +260,26 @@ export default function DucatPlanner({ items }: { items: RankedItem[] }) {
                           {group.total_plat}p · {group.total_ducats} ducats
                         </span>
                       </div>
-                      <button
-                        onClick={() => copyWhisper(group)}
-                        className="px-2.5 py-1 rounded text-xs bg-zinc-800 border border-zinc-700 hover:bg-zinc-700 transition-colors text-zinc-300 whitespace-nowrap"
+                      <span
+                        className="inline-flex gap-1"
+                        title="Split into parts when over Warframe's chat length cap — send in order"
                       >
-                        {copied === group.seller_name ? "Copied!" : "Copy /w"}
-                      </button>
+                        {buildWhispers(group.seller_name, group.purchases, group.total_plat).map(
+                          (_, part, arr) => (
+                            <button
+                              key={part}
+                              onClick={() => copyWhisper(group, part)}
+                              className="px-2.5 py-1 rounded text-xs bg-zinc-800 border border-zinc-700 hover:bg-zinc-700 transition-colors text-zinc-300 whitespace-nowrap"
+                            >
+                              {copied === `${group.seller_name}#${part}`
+                                ? "✓"
+                                : arr.length === 1
+                                  ? "Copy /w"
+                                  : `/w ${part + 1}/${arr.length}`}
+                            </button>
+                          ),
+                        )}
+                      </span>
                     </div>
                     <div className="overflow-x-auto">
                       <table className="w-full text-xs">

@@ -1,9 +1,8 @@
-// Warframe's in-game chat caps a single message near ~100 characters, so a
-// fully itemized whisper truncates the moment a bundle has more than a couple
-// of parts. Build the itemized message only when it fits with margin; otherwise
-// fall back to a count summary that always fits — the seller recognizes
-// "(warframe.market)" as "buying your listings", and the exact items are
-// visible on-screen and settled in the trade window.
+// Warframe's in-game chat caps a single message near ~100 characters. Instead
+// of truncating or collapsing to a bare count, split the itemized whisper into
+// a sequence of messages, each under the cap: the first opens with the
+// greeting, continuations are prefixed "+", and the total closes the last one.
+// The UI renders one copy button per part.
 export const WF_SAFE_LEN = 90;
 
 export interface WhisperItem {
@@ -11,15 +10,42 @@ export interface WhisperItem {
   quantity: number;
 }
 
-export function buildWhisper(
+export function buildWhispers(
   sellerName: string,
   items: WhisperItem[],
   totalPlat: number,
-): string {
-  const itemList = items
-    .map((i) => (i.quantity > 1 ? `${i.item_name} x${i.quantity}` : i.item_name))
-    .join(", ");
-  const full = `/w ${sellerName} Hi! WTB: ${itemList} for ${totalPlat}p (warframe.market)`;
-  if (full.length <= WF_SAFE_LEN) return full;
-  return `/w ${sellerName} Hi! WTB ${items.length} prime parts, ${totalPlat}p (warframe.market)`;
+): string[] {
+  const tokens = items.map((i) =>
+    i.quantity > 1 ? `${i.item_name} x${i.quantity}` : i.item_name,
+  );
+  const firstPrefix = `/w ${sellerName} Hi! WTB: `;
+  const contPrefix = `/w ${sellerName} + `;
+  const suffix = ` for ${totalPlat}p (warframe.market)`;
+
+  const messages: string[] = [];
+  let current = firstPrefix;
+  let count = 0;
+
+  for (const token of tokens) {
+    const sep = count === 0 ? "" : ", ";
+    // Start a new message when this token would overflow — unless the message
+    // is empty (an unsplittable long name is allowed to overflow alone).
+    if (count > 0 && current.length + sep.length + token.length > WF_SAFE_LEN) {
+      messages.push(current);
+      current = contPrefix + token;
+      count = 1;
+    } else {
+      current += sep + token;
+      count++;
+    }
+  }
+
+  if (current.length + suffix.length <= WF_SAFE_LEN) {
+    messages.push(current + suffix);
+  } else {
+    messages.push(current);
+    messages.push(`/w ${sellerName} = ${totalPlat}p total (warframe.market)`);
+  }
+
+  return messages;
 }
