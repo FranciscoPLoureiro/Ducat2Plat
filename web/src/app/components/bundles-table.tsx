@@ -3,7 +3,7 @@
 import { useMemo, useState } from "react";
 import type { BundleSeller } from "@/lib/data";
 import { useSettings } from "@/lib/settings";
-import { buildWhispers } from "@/lib/whisper";
+import { buildWhispers, partitionIntoTrades } from "@/lib/whisper";
 
 
 export default function BundlesTable({ bundles }: { bundles: BundleSeller[] }) {
@@ -148,6 +148,7 @@ function SellerRow({
   onToggleWhisper: () => void;
 }) {
   const parts = buildWhispers(bundle.seller_name, bundle.items, bundle.total_plat);
+  const trades = partitionIntoTrades(bundle.items);
 
   return (
     <>
@@ -232,33 +233,55 @@ function SellerRow({
       {isExpanded && (
         <tr className="bg-zinc-900/50">
           <td colSpan={7} className="px-6 py-3">
-            <table className="w-full text-xs">
-              <thead>
-                <tr className="text-zinc-500 border-b border-zinc-800">
-                  <th className="py-1 px-2 text-left font-medium">Item</th>
-                  <th className="py-1 px-2 text-right font-medium">Ducats</th>
-                  <th className="py-1 px-2 text-right font-medium">Price</th>
-                  <th className="py-1 px-2 text-right font-medium">Qty</th>
-                </tr>
-              </thead>
-              <tbody>
-                {bundle.items.map((item) => (
-                  <tr
-                    key={item.url_name}
-                    className="border-b border-zinc-800/50"
-                  >
-                    <td className="py-1 px-2 text-zinc-300">
-                      {item.item_name}
-                    </td>
-                    <td className="py-1 px-2 text-right text-amber-400">
-                      {item.ducats}
-                    </td>
-                    <td className="py-1 px-2 text-right">{item.price}p</td>
-                    <td className="py-1 px-2 text-right">{item.quantity}</td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
+            {trades.length > 1 && (
+              <p className="text-xs text-zinc-500 mb-2">
+                {trades.length} in-game trades needed (6 items each), highest ducat
+                value first.
+              </p>
+            )}
+            <div className="space-y-3">
+              {trades.map((trade, ti) => (
+                <div key={ti}>
+                  {trades.length > 1 && (
+                    <div
+                      className={`flex items-center justify-between text-xs font-medium px-1 mb-1 ${
+                        trade.partial ? "text-amber-400" : "text-zinc-400"
+                      }`}
+                    >
+                      <span>
+                        Trade {ti + 1}/{trades.length}
+                        {trade.partial && (
+                          <span className="ml-1 font-normal">
+                            — only {trade.units} item{trade.units === 1 ? "" : "s"},
+                            worth {trade.ducatTotal}d. A full trade slot for little
+                            value — consider skipping.
+                          </span>
+                        )}
+                      </span>
+                      <span className="text-zinc-500">
+                        {trade.units}/6 slots · {trade.ducatTotal}d · {trade.platTotal}p
+                      </span>
+                    </div>
+                  )}
+                  <table className="w-full text-xs">
+                    <tbody>
+                      {trade.items.map((item, ii) => (
+                        <tr key={`${ti}-${ii}`} className="border-b border-zinc-800/50">
+                          <td className="py-1 px-2 text-zinc-300">{item.item_name}</td>
+                          <td className="py-1 px-2 text-right text-amber-400 w-16">
+                            {item.ducats}d
+                          </td>
+                          <td className="py-1 px-2 text-right w-12">{item.price}p</td>
+                          <td className="py-1 px-2 text-right w-10 text-zinc-500">
+                            {item.quantity > 1 ? `x${item.quantity}` : ""}
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              ))}
+            </div>
           </td>
         </tr>
       )}
