@@ -62,9 +62,12 @@ export default function BundlesTable({ bundles }: { bundles: BundleSeller[] }) {
   const minItemPpd = settings.minItemPpd ?? 0;
 
   const processed = useMemo(() => {
+    // Pruning a sub-threshold item shrinks the basket (and its whispers/trades)
+    // but never removes the seller — a bundle only drops out when the ducats
+    // filter rejects its remaining total, or nothing at all survives.
     const result = bundles
       .map((b) => applyItemFilters(b, hide15, minItemPpd))
-      .filter((b) => b.items.length >= 2 && b.total_ducats >= minDucats);
+      .filter((b) => b.items.length >= 1 && b.total_ducats >= minDucats);
     result.sort((a, b) => b.combined_ppd - a.combined_ppd);
     return result;
   }, [bundles, hide15, minItemPpd, minDucats]);
