@@ -89,6 +89,9 @@ async function wfmFetch(url: string): Promise<unknown> {
       headers: {
         Accept: "application/json",
         Platform: "pc",
+        // Warframe has cross-platform trading: merge crossplay-enabled console
+        // sellers into the book (a PC player can trade with them in-game).
+        Crossplay: "true",
         Language: "en",
         "User-Agent": USER_AGENT,
       },

@@ -68,6 +68,8 @@ async function fetchItemSells(
       headers: {
         Accept: "application/json",
         Platform: "pc",
+        // Cross-platform trading: include crossplay-enabled console sellers.
+        Crossplay: "true",
         Language: "en",
         "User-Agent": USER_AGENT,
       },
@@ -111,6 +113,7 @@ async function fetchUserSells(
       headers: {
         Accept: "application/json",
         Platform: "pc",
+        Crossplay: "true",
         Language: "en",
         "User-Agent": USER_AGENT,
       },
