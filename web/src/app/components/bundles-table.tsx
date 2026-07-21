@@ -2,9 +2,26 @@
 
 import { useMemo, useState } from "react";
 import type { BundleSeller } from "@/lib/data";
-import { useSettings } from "@/lib/settings";
+import { useSettings, updateSettings } from "@/lib/settings";
 import { buildWhispers, partitionIntoTrades } from "@/lib/whisper";
 
+// Per-item filters run client-side, so a basket's items, totals, PpD and trade
+// breakdown must all be recomputed from the surviving items.
+function applyItemFilters(
+  b: BundleSeller,
+  hide15: boolean,
+  minPpd: number,
+): BundleSeller {
+  const items = b.items.filter((i) => {
+    if (hide15 && i.ducats === 15) return false;
+    if (minPpd > 0 && i.price > 0 && i.ducats / i.price < minPpd) return false;
+    return true;
+  });
+  const total_ducats = items.reduce((s, i) => s + i.ducats * i.quantity, 0);
+  const total_plat = items.reduce((s, i) => s + i.price * i.quantity, 0);
+  const combined_ppd = total_plat > 0 ? total_ducats / total_plat : 0;
+  return { ...b, items, total_ducats, total_plat, combined_ppd };
+}
 
 export default function BundlesTable({ bundles }: { bundles: BundleSeller[] }) {
   const [expanded, setExpanded] = useState<Set<string>>(new Set());
@@ -41,15 +58,21 @@ export default function BundlesTable({ bundles }: { bundles: BundleSeller[] }) {
     } catch {}
   }
 
-  const filtered = useMemo(() => {
-    let result = bundles.filter((b) => b.total_ducats >= minDucats);
-    if (!showAll) result = result.slice(0, 50);
-    return result;
-  }, [bundles, minDucats, showAll]);
+  const hide15 = settings.hide15Ducats ?? false;
+  const minItemPpd = settings.minItemPpd ?? 0;
 
-  const fullCount = useMemo(
-    () => bundles.filter((b) => b.total_ducats >= minDucats).length,
-    [bundles, minDucats],
+  const processed = useMemo(() => {
+    const result = bundles
+      .map((b) => applyItemFilters(b, hide15, minItemPpd))
+      .filter((b) => b.items.length >= 2 && b.total_ducats >= minDucats);
+    result.sort((a, b) => b.combined_ppd - a.combined_ppd);
+    return result;
+  }, [bundles, hide15, minItemPpd, minDucats]);
+
+  const fullCount = processed.length;
+  const filtered = useMemo(
+    () => (showAll ? processed : processed.slice(0, 50)),
+    [processed, showAll],
   );
 
   return (
@@ -65,6 +88,30 @@ export default function BundlesTable({ bundles }: { bundles: BundleSeller[] }) {
             step={45}
             className="w-20 px-2 py-1 rounded bg-zinc-900 border border-zinc-700 text-zinc-200 focus:outline-none focus:border-zinc-500"
           />
+        </label>
+        <label className="flex items-center gap-1.5 text-zinc-400">
+          Min item PpD
+          <input
+            type="number"
+            value={settings.minItemPpd ?? ""}
+            onChange={(e) => {
+              const v = e.target.value;
+              updateSettings({ minItemPpd: v === "" ? null : Number(v) || 0 });
+            }}
+            min={0}
+            step={0.5}
+            placeholder="0"
+            className="w-16 px-2 py-1 rounded bg-zinc-900 border border-zinc-700 text-zinc-200 focus:outline-none focus:border-zinc-500"
+          />
+        </label>
+        <label className="flex items-center gap-1.5 text-zinc-400 cursor-pointer select-none">
+          <input
+            type="checkbox"
+            checked={settings.hide15Ducats ?? false}
+            onChange={(e) => updateSettings({ hide15Ducats: e.target.checked })}
+            className="accent-zinc-500"
+          />
+          Hide 15-ducat items
         </label>
         {fullCount > 50 && (
           <button

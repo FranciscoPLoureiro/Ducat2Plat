@@ -8,11 +8,18 @@ import { useSyncExternalStore } from "react";
 export interface Settings {
   masteryRank: number | null;
   minVelocity: number | null;
+  hide15Ducats: boolean | null; // hide 15-ducat items from bundles
+  minItemPpd: number | null; // drop bundle items below this ducats/plat
 }
 
 const KEY = "d2p_settings";
 const EVENT = "d2p-settings-changed";
-const EMPTY: Settings = { masteryRank: null, minVelocity: null };
+const EMPTY: Settings = {
+  masteryRank: null,
+  minVelocity: null,
+  hide15Ducats: null,
+  minItemPpd: null,
+};
 
 let cache: Settings = EMPTY;
 let cacheRaw: string | null = null;
