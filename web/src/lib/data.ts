@@ -1,4 +1,5 @@
 import { getSupabase } from "./supabase";
+import { SET_SLOTS } from "./set-slots";
 import {
   computeBaroRoi,
   isSpecialVisit,
@@ -248,14 +249,22 @@ export interface BundleSeller {
   combined_ppd: number;
 }
 
-// A Prime set trades as its individual parts, so it costs (part count) trade
-// slots. Derive each set's part count from sibling url_names: parts of
-// `x_prime_set` are the non-set items whose url_name starts with `x_prime_`.
-// Parts (and anything without siblings) default to 1 slot.
+// A Prime set trades as its individual parts, so it costs that many trade
+// slots — and dual weapons need multiples (Aksomati = barrel x2 + receiver x2
+// + blueprint + link = 6). The exact counts live in the generated SET_SLOTS
+// map (worker/scripts/gen-set-slots.mjs). For any set not yet in the map (a new
+// release before the map is regenerated), fall back to the distinct-part count
+// derived from sibling url_names — an undercount for dual weapons, but better
+// than 1.
 export function computeSetSlots(urlNames: string[]): Map<string, number> {
   const slots = new Map<string, number>();
   for (const u of urlNames) {
     if (!u.endsWith("_set")) continue;
+    const known = SET_SLOTS[u];
+    if (known != null) {
+      slots.set(u, known);
+      continue;
+    }
     const prefix = u.slice(0, -4) + "_";
     let count = 0;
     for (const x of urlNames) {
