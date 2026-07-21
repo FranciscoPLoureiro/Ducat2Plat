@@ -85,11 +85,11 @@ export default function PositionsTable({
             <th className="py-2 px-3 font-medium">Mod</th>
             <th className="py-2 px-3 font-medium text-right">Qty</th>
             <th className="py-2 px-3 font-medium text-right" title="Ducats paid at Baro, per unit">Cost (ducats)</th>
-            <th className="py-2 px-3 font-medium text-right" title="Ducats × the junk rate at purchase time — what those ducats effectively cost in plat">Cost (plat est.)</th>
+            <th className="py-2 px-3 font-medium text-right hidden sm:table-cell" title="Ducats × the junk rate at purchase time — what those ducats effectively cost in plat">Cost (plat est.)</th>
             <th className="py-2 px-3 font-medium text-right" title="Latest daily rank-0 median (open) or your recorded sale price (closed)">Current</th>
             <th className="py-2 px-3 font-medium text-right" title="Sell alert fires when the median reaches this — click to edit">Target</th>
-            <th className="py-2 px-3 font-medium text-right" title="Current median minus target — positive means the target is reached">Distance</th>
-            <th className="py-2 px-3 font-medium text-right" title="Days since purchase">Days</th>
+            <th className="py-2 px-3 font-medium text-right hidden sm:table-cell" title="Current median minus target — positive means the target is reached">Distance</th>
+            <th className="py-2 px-3 font-medium text-right hidden sm:table-cell" title="Days since purchase">Days</th>
             <th className="py-2 px-3 font-medium text-right">
               {showClose ? "P/L (est.)" : "Realized P/L"}
             </th>
@@ -109,7 +109,7 @@ export default function PositionsTable({
                 </td>
                 <td className="py-2 px-3 text-right">{p.qty}</td>
                 <td className="py-2 px-3 text-right text-amber-400">{p.cost_ducats * p.qty}</td>
-                <td className="py-2 px-3 text-right font-mono text-zinc-400">
+                <td className="py-2 px-3 text-right font-mono text-zinc-400 hidden sm:table-cell">
                   {Math.round(costPlat * p.qty)}p
                 </td>
                 <td className="py-2 px-3 text-right font-mono">
@@ -156,12 +156,12 @@ export default function PositionsTable({
                     </span>
                   )}
                 </td>
-                <td className="py-2 px-3 text-right font-mono">
+                <td className="py-2 px-3 text-right font-mono hidden sm:table-cell">
                   {p.distance_to_target !== null && showClose
                     ? `${p.distance_to_target >= 0 ? "+" : ""}${Math.round(p.distance_to_target)}p`
                     : "—"}
                 </td>
-                <td className="py-2 px-3 text-right">{p.days_held}d</td>
+                <td className="py-2 px-3 text-right hidden sm:table-cell">{p.days_held}d</td>
                 <td className={`py-2 px-3 text-right font-mono ${
                   pnl !== null ? (pnl >= 0 ? "text-emerald-400" : "text-red-400") : ""
                 }`}>
@@ -224,7 +224,7 @@ export default function PositionsTable({
               <td className="py-2 px-3 text-right text-amber-400">
                 {positions.reduce((s, p) => s + p.cost_ducats * p.qty, 0)}
               </td>
-              <td className="py-2 px-3 text-right font-mono text-zinc-400">
+              <td className="py-2 px-3 text-right font-mono text-zinc-400 hidden sm:table-cell">
                 {Math.round(
                   positions.reduce((s, p) => s + p.cost_ducats * p.junk_rate_at_buy * p.qty, 0),
                 )}p
@@ -236,7 +236,11 @@ export default function PositionsTable({
                     )}p`
                   : "—"}
               </td>
-              <td colSpan={3} />
+              {/* Target, then Distance + Days (the latter two hidden on mobile
+                  like their columns, so footer cells stay aligned) */}
+              <td />
+              <td className="hidden sm:table-cell" />
+              <td className="hidden sm:table-cell" />
               <td className="py-2 px-3 text-right font-mono">
                 {(() => {
                   const total = positions.reduce(

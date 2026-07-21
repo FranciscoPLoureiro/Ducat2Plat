@@ -184,7 +184,7 @@ export default function BaroAdvisor({ data, junkRate }: { data: AdvisorData; jun
                 p/ducat{sortIcon("profitPerDucat")}
               </th>
               <th
-                className="py-2 px-3 font-medium text-right cursor-pointer hover:text-zinc-200 whitespace-nowrap"
+                className="py-2 px-3 font-medium text-right cursor-pointer hover:text-zinc-200 whitespace-nowrap hidden sm:table-cell"
                 onClick={() => toggleSort("profitPerDay")}
               >
                 p/day{sortIcon("profitPerDay")}
@@ -345,7 +345,7 @@ function ModRow({
         <td className="py-2 px-3 text-right font-mono">
           {mod.profitPerDucat > 0 ? mod.profitPerDucat.toFixed(2) : "—"}
         </td>
-        <td className="py-2 px-3 text-right font-mono">
+        <td className="py-2 px-3 text-right font-mono hidden sm:table-cell">
           {mod.profitPerDay !== null ? mod.profitPerDay.toFixed(1) : "—"}
         </td>
         <td className="py-2 px-3 text-right text-amber-400">

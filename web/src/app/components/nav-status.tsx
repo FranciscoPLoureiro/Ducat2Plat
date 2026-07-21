@@ -65,7 +65,7 @@ export default function NavStatus() {
 
   return (
     <div
-      className="ml-auto flex items-center gap-3 text-xs text-zinc-500"
+      className="ml-auto hidden md:flex items-center gap-3 text-xs text-zinc-500"
       title={`Last sweep #${status.sweepId ?? "?"} — listings can be up to a day old`}
     >
       <span>

@@ -39,9 +39,9 @@ export default function NextVisitForecast({ forecast }: { forecast: ForecastEntr
                 <th className="py-1.5 px-2 font-medium">Item</th>
                 <th className="py-1.5 px-2 font-medium">Likelihood</th>
                 <th className="py-1.5 px-2 font-medium text-right" title="Visits since it last appeared (counting the upcoming one) vs its typical gap between appearances">Wait / typical</th>
-                <th className="py-1.5 px-2 font-medium text-right" title="Times seen across recorded normal visits">Seen</th>
+                <th className="py-1.5 px-2 font-medium text-right hidden sm:table-cell" title="Times seen across recorded normal visits">Seen</th>
                 <th className="py-1.5 px-2 font-medium text-right">Ducats</th>
-                <th className="py-1.5 px-2 font-medium text-right">Credits</th>
+                <th className="py-1.5 px-2 font-medium text-right hidden sm:table-cell">Credits</th>
               </tr>
             </thead>
             <tbody>
@@ -56,11 +56,11 @@ export default function NextVisitForecast({ forecast }: { forecast: ForecastEntr
                   <td className="py-1.5 px-2 text-right text-zinc-400 whitespace-nowrap">
                     {f.lastSeenVisitsAgo + 1}v / {f.medianGap}v
                   </td>
-                  <td className="py-1.5 px-2 text-right text-zinc-500">{f.appearances}×</td>
+                  <td className="py-1.5 px-2 text-right text-zinc-500 hidden sm:table-cell">{f.appearances}×</td>
                   <td className="py-1.5 px-2 text-right text-amber-400">
                     {f.ducat_cost !== null ? f.ducat_cost.toLocaleString() : "—"}
                   </td>
-                  <td className="py-1.5 px-2 text-right text-zinc-400">
+                  <td className="py-1.5 px-2 text-right text-zinc-400 hidden sm:table-cell">
                     {f.credit_cost !== null ? f.credit_cost.toLocaleString() : "—"}
                   </td>
                 </tr>

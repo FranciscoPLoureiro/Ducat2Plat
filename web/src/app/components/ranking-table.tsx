@@ -91,13 +91,13 @@ export default function RankingTable({ items }: { items: RankedItem[] }) {
         <table className="w-full text-sm border-collapse">
           <thead>
             <tr className="border-b border-zinc-700 text-zinc-400 text-left">
-              <th className="py-2 px-3 font-medium">#</th>
+              <th className="py-2 px-3 font-medium hidden sm:table-cell">#</th>
               <th className="py-2 px-3 font-medium">Item</th>
               <th className="py-2 px-3 font-medium text-right" title="Ducat value when sold to Baro's kiosk — a fixed game constant">Ducats</th>
-              <th className="py-2 px-3 font-medium text-right" title="Median closed-trade price (yesterday) — what it actually sells for, not what's listed">Median</th>
-              <th className="py-2 px-3 font-medium text-right" title="Ducats per plat at the median price — the naive rate">PpD</th>
+              <th className="py-2 px-3 font-medium text-right hidden sm:table-cell" title="Median closed-trade price (yesterday) — what it actually sells for, not what's listed">Median</th>
+              <th className="py-2 px-3 font-medium text-right hidden sm:table-cell" title="Ducats per plat at the median price — the naive rate">PpD</th>
               <th className="py-2 px-3 font-medium text-right" title="Ducats per plat when actually buying 6 units from live in-game listings — the honest rate">PpD@6</th>
-              <th className="py-2 px-3 font-medium text-right" title="Real units sold per day over the last 14 days — liquidity">Velocity</th>
+              <th className="py-2 px-3 font-medium text-right hidden sm:table-cell" title="Real units sold per day over the last 14 days — liquidity">Velocity</th>
               <th className="py-2 px-3 font-medium text-right" title="PpD@6 down-weighted for illiquidity — the ranking metric">Score</th>
               <th className="py-2 px-3 font-medium text-center" title="OK: 6+ units available from in-game sellers. SHALLOW: fewer — the rate is based on less depth">Depth</th>
             </tr>
@@ -148,7 +148,7 @@ function ItemRow({
         className="border-b border-zinc-800 hover:bg-zinc-900 cursor-pointer transition-colors"
         onClick={onToggle}
       >
-        <td className="py-2 px-3 text-zinc-500">{rank}</td>
+        <td className="py-2 px-3 text-zinc-500 hidden sm:table-cell">{rank}</td>
         <td className="py-2 px-3 font-medium">
           <span className="mr-2 text-zinc-500 text-xs">
             {isExpanded ? "▼" : "▶"}
@@ -162,8 +162,8 @@ function ItemRow({
           </Link>
         </td>
         <td className="py-2 px-3 text-right text-amber-400">{item.ducats}</td>
-        <td className="py-2 px-3 text-right">{item.median}p</td>
-        <td className="py-2 px-3 text-right">{item.ppd.toFixed(1)}</td>
+        <td className="py-2 px-3 text-right hidden sm:table-cell">{item.median}p</td>
+        <td className="py-2 px-3 text-right hidden sm:table-cell">{item.ppd.toFixed(1)}</td>
         <td className="py-2 px-3 text-right font-semibold text-emerald-400">
           {item.ppd_at_n !== null ? item.ppd_at_n.toFixed(1) : "—"}
           {isOutlier && (
@@ -175,7 +175,7 @@ function ItemRow({
             </span>
           )}
         </td>
-        <td className="py-2 px-3 text-right">
+        <td className="py-2 px-3 text-right hidden sm:table-cell">
           {Math.round(item.velocity)}/d
         </td>
         <td className="py-2 px-3 text-right font-bold text-cyan-400">

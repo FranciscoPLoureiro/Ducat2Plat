@@ -85,7 +85,7 @@ export default function BaroHistory({ items }: { items: BaroItemHistory[] }) {
                 Last Seen
               </th>
               <th
-                className="py-2 px-3 font-medium text-right"
+                className="py-2 px-3 font-medium text-right hidden sm:table-cell"
                 title="Total recorded visits carrying this item (regular visits only — TennoCon excluded)"
               >
                 Times Carried
@@ -93,7 +93,7 @@ export default function BaroHistory({ items }: { items: BaroItemHistory[] }) {
               <th className="py-2 px-3 font-medium text-right" title="Baro's ducat price at the most recent carry">
                 Ducats
               </th>
-              <th className="py-2 px-3 font-medium text-right" title="Baro's credit price at the most recent carry">
+              <th className="py-2 px-3 font-medium text-right hidden sm:table-cell" title="Baro's credit price at the most recent carry">
                 Credits
               </th>
             </tr>
@@ -126,13 +126,13 @@ export default function BaroHistory({ items }: { items: BaroItemHistory[] }) {
                     </span>
                   )}
                 </td>
-                <td className="py-2 px-3 text-right text-zinc-400">
+                <td className="py-2 px-3 text-right text-zinc-400 hidden sm:table-cell">
                   {item.visits.length}
                 </td>
                 <td className="py-2 px-3 text-right text-amber-400">
                   {item.ducat_cost ?? "—"}
                 </td>
-                <td className="py-2 px-3 text-right text-zinc-400">
+                <td className="py-2 px-3 text-right text-zinc-400 hidden sm:table-cell">
                   {item.credit_cost !== null ? item.credit_cost.toLocaleString("en-US") : "—"}
                 </td>
               </tr>

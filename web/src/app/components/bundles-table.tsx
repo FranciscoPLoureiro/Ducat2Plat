@@ -135,11 +135,11 @@ export default function BundlesTable({ bundles }: { bundles: BundleSeller[] }) {
         <table className="w-full text-sm border-collapse">
           <thead>
             <tr className="border-b border-zinc-700 text-zinc-400 text-left">
-              <th className="py-2 px-3 font-medium">#</th>
+              <th className="py-2 px-3 font-medium hidden sm:table-cell">#</th>
               <th className="py-2 px-3 font-medium" title="warframe.market seller (in-game at sweep time). Click the name to open their profile.">Seller</th>
               <th className="py-2 px-3 font-medium text-right" title="Trade slots this basket needs — one trade holds 6, and a set costs one slot per part. Expand for the per-trade breakdown.">Slots</th>
               <th className="py-2 px-3 font-medium text-right" title="Ducat value of buying the whole basket">Total Ducats</th>
-              <th className="py-2 px-3 font-medium text-right" title="Plat cost of the whole basket at listed prices">Total Plat</th>
+              <th className="py-2 px-3 font-medium text-right hidden sm:table-cell" title="Plat cost of the whole basket at listed prices">Total Plat</th>
               <th className="py-2 px-3 font-medium text-right" title="Ducats per plat for the whole basket — higher is better">Combined PpD</th>
               <th className="py-2 px-3 font-medium" />
             </tr>
@@ -206,7 +206,7 @@ function SellerRow({
         className="border-b border-zinc-800 hover:bg-zinc-900 cursor-pointer transition-colors"
         onClick={onToggle}
       >
-        <td className="py-2 px-3 text-zinc-500">{rank}</td>
+        <td className="py-2 px-3 text-zinc-500 hidden sm:table-cell">{rank}</td>
         <td className="py-2 px-3 font-medium">
           <span className="mr-2 text-zinc-500 text-xs">
             {isExpanded ? "▼" : "▶"}
@@ -230,7 +230,7 @@ function SellerRow({
         <td className="py-2 px-3 text-right text-amber-400">
           {bundle.total_ducats}
         </td>
-        <td className="py-2 px-3 text-right">{bundle.total_plat}p</td>
+        <td className="py-2 px-3 text-right hidden sm:table-cell">{bundle.total_plat}p</td>
         <td className="py-2 px-3 text-right font-bold text-emerald-400">
           {bundle.combined_ppd.toFixed(1)}
         </td>

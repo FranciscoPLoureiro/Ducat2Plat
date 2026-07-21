@@ -51,7 +51,7 @@ function Section({ title, items, defaultOpen, showRoi, showMaxRank, onToggleRank
               <tr className="border-b border-zinc-700 text-zinc-400 text-left">
                 <th className="py-2 px-3 font-medium">Item</th>
                 <th className="py-2 px-3 font-medium text-right">Ducats</th>
-                <th className="py-2 px-3 font-medium text-right">Credits</th>
+                <th className="py-2 px-3 font-medium text-right hidden sm:table-cell">Credits</th>
                 {showRoi && (
                   <>
                     <th className="py-2 px-3 font-medium text-right whitespace-nowrap">
@@ -90,7 +90,7 @@ function Section({ title, items, defaultOpen, showRoi, showMaxRank, onToggleRank
                     <td className="py-2 px-3 text-right text-amber-400">
                       {item.ducat_cost}
                     </td>
-                    <td className="py-2 px-3 text-right text-zinc-400">
+                    <td className="py-2 px-3 text-right text-zinc-400 hidden sm:table-cell">
                       {item.credit_cost.toLocaleString()}
                     </td>
                     {showRoi && (
