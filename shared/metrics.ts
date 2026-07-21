@@ -401,3 +401,66 @@ export function greedyBasketOptimize(
   }
   return selected;
 }
+
+// ── Next-Visit Forecast ────────────────────────────────────────────
+// Between visits: which items are statistically "due" to reappear, from each
+// item's own restock cadence. gapAtNext = visits between the item's last
+// appearance and the UPCOMING visit; dueRatio = gapAtNext / median gap.
+// >=1 means the usual wait is over.
+
+export type ForecastLikelihood = "OVERDUE" | "DUE" | "POSSIBLE" | "UNLIKELY";
+
+export interface ForecastItemInput {
+  item_name: string;
+  ducat_cost: number | null;
+  credit_cost: number | null;
+  // Appearance indexes over normal visits, 0 = most recent visit.
+  visits_ago: number[];
+}
+
+export interface ForecastEntry {
+  item_name: string;
+  ducat_cost: number | null;
+  credit_cost: number | null;
+  appearances: number;
+  lastSeenVisitsAgo: number;
+  medianGap: number;
+  dueRatio: number;
+  likelihood: ForecastLikelihood;
+}
+
+export function likelihoodFor(dueRatio: number): ForecastLikelihood {
+  if (dueRatio >= 1.5) return "OVERDUE";
+  if (dueRatio >= 0.9) return "DUE";
+  if (dueRatio >= 0.6) return "POSSIBLE";
+  return "UNLIKELY";
+}
+
+export function computeVisitForecast(
+  items: ForecastItemInput[],
+  minAppearances: number = 3,
+): ForecastEntry[] {
+  const out: ForecastEntry[] = [];
+  for (const item of items) {
+    if (item.visits_ago.length < minAppearances) continue;
+    const medianGap = computeRestockInterval(item.visits_ago);
+    if (medianGap === null || medianGap <= 0) continue;
+    const lastSeenVisitsAgo = Math.min(...item.visits_ago);
+    const gapAtNext = lastSeenVisitsAgo + 1;
+    const dueRatio = gapAtNext / medianGap;
+    out.push({
+      item_name: item.item_name,
+      ducat_cost: item.ducat_cost,
+      credit_cost: item.credit_cost,
+      appearances: item.visits_ago.length,
+      lastSeenVisitsAgo,
+      medianGap,
+      dueRatio,
+      likelihood: likelihoodFor(dueRatio),
+    });
+  }
+  out.sort(
+    (a, b) => b.dueRatio - a.dueRatio || a.item_name.localeCompare(b.item_name),
+  );
+  return out;
+}

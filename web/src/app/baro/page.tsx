@@ -14,7 +14,8 @@ import BaroAdvisor from "../components/baro-advisor";
 import StalenessBanner from "../components/staleness-banner";
 import HelpBox from "../components/help-box";
 import NextVisitPrep, { type WatchlistEntry } from "../components/next-visit-prep";
-import { computeBaseline, computeVisitVerdict } from "@/lib/metrics";
+import NextVisitForecast from "../components/next-visit-forecast";
+import { computeBaseline, computeVisitVerdict, computeVisitForecast } from "@/lib/metrics";
 
 export const metadata: Metadata = { title: "Baro Ki'Teer" };
 export const revalidate = 3600;
@@ -77,6 +78,21 @@ export default async function BaroPage() {
           .sort((a, b) => a.pct - b.pct)
       : [];
 
+  // Between visits: which tradeable items are statistically due to reappear,
+  // from each item's own restock cadence (cosmetics excluded — arbitrage noise).
+  const forecast = !activeVisit
+    ? computeVisitForecast(
+        itemHistory
+          .filter((h) => h.matched)
+          .map((h) => ({
+            item_name: h.item_name,
+            ducat_cost: h.ducat_cost,
+            credit_cost: h.credit_cost,
+            visits_ago: h.visits.map((v) => v.visits_ago),
+          })),
+      )
+    : [];
+
   return (
     <div className="max-w-7xl mx-auto px-4 py-6">
       <StalenessBanner />
@@ -101,6 +117,8 @@ export default async function BaroPage() {
           lastVisitWasSpecial={lastVisitWasSpecial}
         />
       )}
+
+      {!activeVisit && <NextVisitForecast forecast={forecast} />}
 
       {advisorData && advisorData.mods.length > 0 && (
         <section className="mb-8">
