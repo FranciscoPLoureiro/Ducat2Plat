@@ -248,8 +248,9 @@ export async function GET() {
     const rankedSellers = [...sellerItems.entries()]
       .map(([name, items]) => ({
         name,
-        count: items.length,
-        ducats: items.reduce((s, i) => s + i.ducats, 0),
+        // units, not distinct listings — a qty-2 listing signals a basket too
+        count: items.reduce((s, i) => s + i.quantity, 0),
+        ducats: items.reduce((s, i) => s + i.ducats * i.quantity, 0),
       }))
       .sort((a, b) => b.count - a.count || b.ducats - a.ducats)
       .slice(0, STAGE2_SELLERS)
@@ -293,7 +294,10 @@ export async function GET() {
 
     const bundles: BundleSeller[] = [];
     for (const [seller_name, items] of sellerItems) {
-      if (items.length < 2) continue;
+      // 2+ purchasable UNITS qualifies — a single listing with quantity 2
+      // (e.g. two Kompressa Prime Sets) is a real basket.
+      const units = items.reduce((s, i) => s + i.quantity, 0);
+      if (units < 2) continue;
       items.sort((a, b) => b.ducats / b.price - a.ducats / a.price);
       const total_ducats = items.reduce((s, i) => s + i.ducats * i.quantity, 0);
       const total_plat = items.reduce((s, i) => s + i.price * i.quantity, 0);
