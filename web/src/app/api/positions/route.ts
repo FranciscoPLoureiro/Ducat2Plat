@@ -1,4 +1,5 @@
 import { NextRequest } from "next/server";
+import { revalidatePath } from "next/cache";
 import { getSupabaseAdmin } from "@/lib/supabase-admin";
 
 function authorize(request: NextRequest): boolean {
@@ -64,5 +65,6 @@ export async function POST(request: NextRequest) {
     return Response.json({ error: error.message }, { status: 500 });
   }
 
+  revalidatePath("/positions");
   return Response.json({ id: data?.id }, { status: 201 });
 }
