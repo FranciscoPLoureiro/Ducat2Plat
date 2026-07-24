@@ -141,7 +141,7 @@ export default function BaroAdvisor({ data, junkRate }: { data: AdvisorData; jun
 
       {data.currentTopPpD !== null && (
         <div className="mb-3 px-4 py-2 rounded bg-zinc-800/60 border border-zinc-700 text-zinc-300 text-sm">
-          This visit's top picks average{" "}
+          This visit&apos;s top picks average{" "}
           <span className="font-semibold text-zinc-100">
             {data.currentTopPpD.toFixed(3)} p/ducat
           </span>
