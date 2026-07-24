@@ -368,15 +368,15 @@ async function fetchBaro(): Promise<void> {
   console.log(`Baro: ${inventory.length} items in inventory`);
 
   // Get all prime_items for case-insensitive matching
-  const allItems: { id: string; item_name: string }[] = [];
+  const allItems: { id: string; item_name: string; url_name: string }[] = [];
   let dbFrom = 0;
   const PAGE = 1000;
   while (true) {
     const { data: page } = await db
       .from("prime_items")
-      .select("id, item_name")
+      .select("id, item_name, url_name")
       .range(dbFrom, dbFrom + PAGE - 1);
-    const rows = (page ?? []) as { id: string; item_name: string }[];
+    const rows = (page ?? []) as { id: string; item_name: string; url_name: string }[];
     if (!rows.length) break;
     for (const r of rows) allItems.push(r);
     if (rows.length < PAGE) break;
@@ -384,12 +384,16 @@ async function fetchBaro(): Promise<void> {
   }
 
   const nameLookup = new Map<string, string>();
+  const slugLookup = new Map<string, string>();
   for (const item of allItems) {
     nameLookup.set(item.item_name.toLowerCase(), item.id);
+    slugLookup.set(item.url_name, item.id);
   }
 
   const rows = inventory.map((inv) => {
-    const matchedId = nameLookup.get(inv.item.toLowerCase()) ?? null;
+    const matchedId = nameLookup.get(inv.item.toLowerCase()) 
+      ?? slugLookup.get(inv.item.toLowerCase().replace(/[^a-z0-9]+/g, '_').replace(/^_|_$/g, '')) 
+      ?? null;
     return {
       visit_id: visitId,
       item_id: matchedId,
@@ -398,6 +402,11 @@ async function fetchBaro(): Promise<void> {
       credit_cost: inv.credits,
     };
   });
+
+  const unmatched = rows.filter(r => r.item_id === null);
+  if (unmatched.length > 0) {
+    console.warn(`Baro: ${unmatched.length} UNMATCHED items: ${unmatched.map(r => r.item_name).join(', ')}`);
+  }
 
   const { error: itemsErr } = await db
     .from("baro_visit_items")

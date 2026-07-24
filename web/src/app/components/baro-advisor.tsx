@@ -11,7 +11,8 @@ type SortKey =
   | "holdDays"
   | "sellNowProfit"
   | "holdProfit"
-  | "ducatCost";
+  | "ducatCost"
+  | "velocity";
 
 interface BuyFormState {
   modIdx: number;
@@ -138,6 +139,24 @@ export default function BaroAdvisor({ data, junkRate }: { data: AdvisorData; jun
         </div>
       )}
 
+      {data.currentTopPpD !== null && (
+        <div className="mb-3 px-4 py-2 rounded bg-zinc-800/60 border border-zinc-700 text-zinc-300 text-sm">
+          This visit's top picks average{" "}
+          <span className="font-semibold text-zinc-100">
+            {data.currentTopPpD.toFixed(3)} p/ducat
+          </span>
+          {data.benchmarkPpD !== null && (
+            <>
+              {" "}— typical best visits average{" "}
+              <span className="font-semibold text-zinc-100">
+                {data.benchmarkPpD.toFixed(3)} p/ducat
+              </span>
+              {" "}({Math.round((data.currentTopPpD / data.benchmarkPpD) * 100)}% of typical)
+            </>
+          )}
+        </div>
+      )}
+
       {/* Basket optimizer */}
       <div className="mb-4 flex flex-wrap items-end gap-3">
         <label className="text-sm text-zinc-400">
@@ -195,6 +214,12 @@ export default function BaroAdvisor({ data, junkRate }: { data: AdvisorData; jun
               >
                 Ducats{sortIcon("ducatCost")}
               </th>
+              <th
+                className="py-2 px-3 font-medium text-right cursor-pointer hover:text-zinc-200 whitespace-nowrap hidden sm:table-cell"
+                onClick={() => toggleSort("velocity")}
+              >
+                Vol/day{sortIcon("velocity")}
+              </th>
               <th className="py-2 px-3 font-medium text-center">Stage</th>
             </tr>
           </thead>
@@ -223,7 +248,7 @@ export default function BaroAdvisor({ data, junkRate }: { data: AdvisorData; jun
             })}
             {sorted.length === 0 && (
               <tr>
-                <td colSpan={6} className="py-8 text-center text-zinc-500">
+                <td colSpan={7} className="py-8 text-center text-zinc-500">
                   No primed mods with pricing data in this visit.
                 </td>
               </tr>
@@ -330,6 +355,14 @@ function ModRow({
               ⚠ restock
             </span>
           )}
+          {mod.velocity !== null && mod.velocity < 5 && (
+            <span
+              className="ml-1 text-xs text-red-500"
+              title="Low trading volume — may be hard to sell quickly"
+            >
+              ⚠ illiquid
+            </span>
+          )}
         </td>
         <td className={`py-2 px-3 font-semibold whitespace-nowrap ${verdictColor}`}>
           {mod.verdict}{holdBadge}
@@ -351,6 +384,17 @@ function ModRow({
         <td className="py-2 px-3 text-right text-amber-400">
           {mod.ducatCost}
         </td>
+        <td className="py-2 px-3 text-right font-mono hidden sm:table-cell">
+          {mod.velocity !== null ? (
+            <span className={
+              mod.velocity >= 15 ? "text-emerald-400" :
+              mod.velocity >= 5 ? "text-amber-400" :
+              "text-red-400"
+            }>
+              {mod.velocity.toFixed(1)}
+            </span>
+          ) : "—"}
+        </td>
         <td className="py-2 px-3 text-center">
           <span
             className="text-xs text-zinc-500 cursor-help border-b border-dotted border-zinc-600"
@@ -362,13 +406,21 @@ function ModRow({
       </tr>
       {buyFormOpen && buyForm && (
         <tr className="border-b border-zinc-800 bg-emerald-950/20">
-          <td colSpan={6} className="px-6 py-3">
+          <td colSpan={7} className="px-6 py-3">
             <div className="flex flex-wrap items-end gap-3 text-sm">
               <label className="text-zinc-400">
                 Qty
                 <input
                   type="number" min="1" value={buyForm.qty}
-                  onChange={(e) => onBuyFormChange({ ...buyForm, qty: e.target.value })}
+                  onChange={(e) => {
+                    const newQty = parseInt(e.target.value, 10) || 0;
+                    onBuyFormChange({
+                      ...buyForm,
+                      qty: e.target.value,
+                      costDucats: String(mod.ducatCost * Math.max(1, newQty)),
+                      costCredits: String(mod.creditCost * Math.max(1, newQty)),
+                    });
+                  }}
                   className="ml-1 w-16 px-2 py-1 rounded bg-zinc-900 border border-zinc-700 text-zinc-200"
                   onClick={(e) => e.stopPropagation()}
                 />
@@ -430,7 +482,7 @@ function ModRow({
 function ExpandedDetails({ mod }: { mod: AdvisorModResult }) {
   return (
     <tr className="border-b border-zinc-800 bg-zinc-900/50">
-      <td colSpan={6} className="px-6 py-3">
+      <td colSpan={7} className="px-6 py-3">
         <div className="grid grid-cols-2 sm:grid-cols-3 gap-x-6 gap-y-2 text-sm">
           <Detail label="Sell-now profit" value={fmt(mod.sellNowProfit)} />
           <Detail
@@ -452,6 +504,10 @@ function ExpandedDetails({ mod }: { mod: AdvisorModResult }) {
                 ? `~${mod.restockIntervalDays}d`
                 : "—"
             }
+          />
+          <Detail
+            label="Volume"
+            value={mod.velocity !== null ? `${mod.velocity.toFixed(1)}/day` : "—"}
           />
           <Detail
             label="Current resale (R0)"

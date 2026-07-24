@@ -904,6 +904,7 @@ export interface AdvisorModResult {
   verdict: import("./metrics").Verdict;
   restockRisk: boolean;
   restockIntervalDays: number | null;
+  velocity: number | null;
   n: number;
   stage: MaturityStage;
   stageLabel: string;
@@ -915,6 +916,8 @@ export interface AdvisorData {
   isSpecialVisit: boolean;
   isTennoConWindow: boolean;
   archiveMonths: number;
+  benchmarkPpD: number | null;
+  currentTopPpD: number | null;
 }
 
 export async function getBaroAdvisorData(): Promise<AdvisorData | null> {
@@ -1035,14 +1038,15 @@ export async function getBaroAdvisorData(): Promise<AdvisorData | null> {
     .filter((id): id is string => id !== null);
 
   const priceHistory = new Map<string, DailyPrice[]>();
+  const volumeHistory = new Map<string, { date: string; volume: number | null }[]>();
   for (let i = 0; i < primedModIds.length; i += CHUNK) {
     const chunk = primedModIds.slice(i, i + CHUNK);
     const stats = await fetchAll<{
-      item_id: string; stat_date: string; median: number;
+      item_id: string; stat_date: string; median: number; volume: number | null;
     }>((from, to) =>
       db
         .from("trade_stats")
-        .select("item_id, stat_date, median")
+        .select("item_id, stat_date, median, volume")
         .in("item_id", chunk)
         .eq("mod_rank", 0)
         .order("stat_date", { ascending: true })
@@ -1051,10 +1055,24 @@ export async function getBaroAdvisorData(): Promise<AdvisorData | null> {
     );
     for (const s of stats) {
       if (!priceHistory.has(s.item_id)) priceHistory.set(s.item_id, []);
+      if (!volumeHistory.has(s.item_id)) volumeHistory.set(s.item_id, []);
       priceHistory.get(s.item_id)!.push({
         date: s.stat_date,
         median: Number(s.median),
       });
+      volumeHistory.get(s.item_id)!.push({
+        date: s.stat_date,
+        volume: s.volume,
+      });
+    }
+  }
+
+  const velocityMap = new Map<string, number>();
+  const cutoff14d = daysAgoDate(14);
+  for (const [itemId, vols] of volumeHistory) {
+    const recentVols = vols.filter(v => v.date >= cutoff14d && v.volume != null);
+    if (recentVols.length > 0) {
+      velocityMap.set(itemId, recentVols.reduce((s, v) => s + (v.volume ?? 0), 0) / recentVols.length);
     }
   }
 
@@ -1198,6 +1216,7 @@ export async function getBaroAdvisorData(): Promise<AdvisorData | null> {
       verdict: verdictResult.verdict,
       restockRisk,
       restockIntervalDays,
+      velocity: mod.item_id ? (velocityMap.get(mod.item_id) ?? null) : null,
       n: modN,
       stage,
       stageLabel,
@@ -1207,10 +1226,18 @@ export async function getBaroAdvisorData(): Promise<AdvisorData | null> {
 
   results.sort((a, b) => b.profitPerDucat - a.profitPerDucat);
 
+  const topN = 5;
+  const topMods = results.filter(m => m.profitPerDucat > 0).slice(0, topN);
+  const currentTopPpD = topMods.length > 0
+    ? topMods.reduce((s, m) => s + m.profitPerDucat, 0) / topMods.length
+    : null;
+
   return {
     mods: results,
     isSpecialVisit: activeVisit.is_special,
     isTennoConWindow,
     archiveMonths,
+    benchmarkPpD: null, // TODO: compute from historical visit advisor data once archive is deep enough
+    currentTopPpD,
   };
 }
