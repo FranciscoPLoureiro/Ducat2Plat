@@ -1,4 +1,4 @@
--- 001_schema.sql: Initial database schema for Ducat2Plat
+-- Initial database schema for Ducat2Plat.
 
 create table prime_items (
   id uuid primary key default gen_random_uuid(),
