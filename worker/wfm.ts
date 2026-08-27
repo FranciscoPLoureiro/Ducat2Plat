@@ -36,10 +36,11 @@
  * ── Rate-limit policy ──
  *
  *   warframe.market allows ~3 req/s; we throttle to 2.5 req/s (400 ms gap).
- *   On HTTP 429 or 503: honor the Retry-After header if present (seconds or
- *   HTTP-date); otherwise exponential backoff (1 s, 2 s, 4 s, 8 s, 16 s),
- *   up to 5 attempts. After 5 failures the call throws; the sweep records
- *   the item as failed and continues.
+ *   On HTTP 429 or any 5xx (including Cloudflare's 520-524): honor the
+ *   Retry-After header if present (seconds or HTTP-date); otherwise
+ *   exponential backoff (1 s, 2 s, 4 s, 8 s, 16 s), up to 5 attempts.
+ *   After 5 failures the call throws; the sweep records the item as failed
+ *   and continues.
  *   warframestat.us calls are not throttled (single request, different host).
  */
 
@@ -79,6 +80,17 @@ function parseRetryAfter(header: string | null): number | null {
   return null;
 }
 
+/**
+ * Transient upstream failures worth retrying. 429 is our own rate limiting;
+ * any 5xx is the origin or its CDN having a moment. api.warframe.market sits
+ * behind Cloudflare, which serves its own 520-524 codes (521 = origin down) —
+ * those fall outside the standard 5xx set most clients special-case, and an
+ * unretried 521 on /v2/items aborted a whole sweep on 2026-07-31.
+ */
+function isRetryable(status: number): boolean {
+  return status === 429 || status >= 500;
+}
+
 async function wfmFetch(url: string): Promise<unknown> {
   const gap = RATE_MS - (Date.now() - lastReq);
   if (gap > 0) await sleep(gap);
@@ -97,7 +109,7 @@ async function wfmFetch(url: string): Promise<unknown> {
       },
     });
 
-    if (res.status === 429 || res.status === 503) {
+    if (isRetryable(res.status)) {
       if (attempt < 5) {
         const retryDelay = parseRetryAfter(res.headers.get("Retry-After"));
         const delay = retryDelay ?? 1000 * 2 ** (attempt - 1);
