@@ -270,17 +270,18 @@ function tradeSegment(trade: Trade, ti: number): string {
 // thing in a message.
 type Piece = { text: string; sep: string };
 
-// Join tokens after `head`, opening a `/w seller + ` continuation whenever a
-// message would pass the chat cap; `suffix` closes the last one.
+// Join tokens after `head`, opening a continuation (`cont`, by default
+// "/w seller + ") whenever a message would pass the chat cap; `suffix` closes
+// the last one.
 function packMessages(
   sellerName: string,
   head: string,
   tokens: (string | Piece)[],
   suffix: string,
   sep = ", ",
+  cont = `/w ${sellerName} + `,
 ): string[] {
   const messages: string[] = [];
-  const cont = `/w ${sellerName} + `;
   let current = head;
   let count = 0;
   for (const t of tokens) {
@@ -322,8 +323,8 @@ export function buildWhispers(
   }
 
   // Several trades: the opener lists what we're buying (as the seller listed
-  // it, with prices) and how it splits into trades of 6 parts, then the whole
-  // plan follows, one short segment per trade — usually 1-2 messages in total,
+  // it, with prices) and how it splits into trades of 6 parts; the trades then
+  // start a fresh message at T1, one short segment each. Usually 2 messages,
   // sent once up front.
   const units = expandUnits(items);
   const parts = units.reduce((s, u) => s + u.slots, 0);
@@ -347,16 +348,22 @@ export function buildWhispers(
   const plan =
     `${parts} parts, 6 per trade = ${n} trades` +
     `${anySplit ? " (a set is paid in the trade that completes it)" : ""}:`;
-  return packMessages(
+  const opener = packMessages(
     sellerName,
     `/w ${sellerName} Hi! WTB ${what} for ${totalPlat}p total (warframe.market): `,
-    [
-      ...listed.map((text) => ({ text, sep: ", " })),
-      { text: plan, sep: " " },
-      ...trades.map((t, ti) => ({ text: tradeSegment(t, ti), sep: ti === 0 ? " " : " | " })),
-    ],
+    [...listed.map((text) => ({ text, sep: ", " })), { text: plan, sep: " " }],
     "",
   );
+  // The "T" labels already mark a continuation, so trade messages skip the "+".
+  const tradeMsgs = packMessages(
+    sellerName,
+    `/w ${sellerName} `,
+    trades.map(tradeSegment),
+    "",
+    " | ",
+    `/w ${sellerName} `,
+  );
+  return [...opener, ...tradeMsgs];
 }
 
 // Separate, optional offer for the items "Full trades only" left out — sent on
