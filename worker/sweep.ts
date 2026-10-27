@@ -1100,7 +1100,79 @@ async function main() {
   await appendRowCountTelemetry(sweepId);
 }
 
-main().catch((err) => {
+// Intraday listings refresh (`npm run refresh`): re-runs only step 4 against
+// the latest completed sweep, every few hours, so bundles don't age a full day.
+// Stats, rankings and Baro stay daily. Batches are swapped, not accumulated:
+// each sweep keeps exactly one set of listings (its freshest), so storage is
+// as flat as with the daily sweep alone. Row ids are identity-ordered, so
+// "before/after this refresh" needs no clock agreement with the database.
+// heartbeat is left alone — it tracks the daily sweep, and the staleness banner
+// must still notice when that stops.
+async function refreshOrders() {
+  console.log("=== Ducat2Plat listings refresh ===\n");
+
+  const { data: sweep, error: sErr } = await db
+    .from("sweeps")
+    .select("id")
+    .not("completed_at", "is", null)
+    .order("completed_at", { ascending: false })
+    .limit(1)
+    .maybeSingle();
+  if (sErr || !sweep) {
+    console.error(`No completed sweep to refresh: ${sErr?.message ?? "none found"}`);
+    process.exit(1);
+  }
+  const sweepId = (sweep as { id: number }).id;
+
+  const { data: last, error: lErr } = await db
+    .from("order_snapshots")
+    .select("id")
+    .order("id", { ascending: false })
+    .limit(1)
+    .maybeSingle();
+  if (lErr) {
+    console.error(`Could not read order_snapshots: ${lErr.message}`);
+    process.exit(1);
+  }
+  const lastIdBefore = (last as { id: number } | null)?.id ?? 0;
+
+  console.log(`Refreshing listings for sweep #${sweepId}`);
+  const { ok, failed } = await fetchOrderDepth(sweepId);
+  const processed = ok + failed;
+  const rate = processed > 0 ? ok / processed : 0;
+  console.log(`Orders done: ${ok} ok, ${failed} failed\n`);
+
+  if (rate < 0.9) {
+    // A mostly-failed refresh would show a hollow page: drop what it wrote
+    // and keep serving the previous batch.
+    const { error } = await db
+      .from("order_snapshots")
+      .delete()
+      .eq("sweep_id", sweepId)
+      .gt("id", lastIdBefore);
+    if (error) console.warn(`Discarding partial batch: ${error.message}`);
+    console.error(
+      `Refresh NOT applied: ${(rate * 100).toFixed(1)}% success (need >=90%) — previous listings kept`,
+    );
+    process.exit(1);
+  }
+
+  const { error: delErr, count } = await db
+    .from("order_snapshots")
+    .delete({ count: "exact" })
+    .eq("sweep_id", sweepId)
+    .lte("id", lastIdBefore);
+  if (delErr) {
+    // The site reads only the newest batch, so leftovers are harmless until
+    // the next refresh or the 14-day retention removes them.
+    console.warn(`Removing previous batch: ${delErr.message}`);
+  } else {
+    console.log(`Replaced the previous batch (${count ?? 0} rows)`);
+  }
+}
+
+const run = process.argv.includes("--orders-only") ? refreshOrders : main;
+run().catch((err) => {
   console.error("Fatal:", err);
   process.exit(1);
 });

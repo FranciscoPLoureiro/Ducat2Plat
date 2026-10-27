@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { fetchAll } from "./data";
+import { fetchAll, newestBatch } from "./data";
 
 describe("fetchAll (PostgREST pagination)", () => {
   it("returns empty array when first page is empty", async () => {
@@ -60,5 +60,28 @@ describe("fetchAll (PostgREST pagination)", () => {
     const page = async () => ({ data: [] as string[] });
     const result = await fetchAll(page);
     expect(result).toEqual([]);
+  });
+});
+
+describe("newestBatch (intraday listings refresh)", () => {
+  const row = (id: number, captured_at: string) => ({ id, captured_at });
+
+  it("keeps everything when there is a single batch", () => {
+    const rows = [row(1, "2026-10-27T06:05:00Z"), row(2, "2026-10-27T06:06:30Z")];
+    expect(newestBatch(rows)).toEqual(rows);
+  });
+
+  it("drops an older batch the refresh failed to remove", () => {
+    const rows = [
+      row(1, "2026-10-27T06:05:00Z"),
+      row(2, "2026-10-27T09:31:00Z"),
+      row(3, "2026-10-27T06:06:00Z"),
+      row(4, "2026-10-27T09:32:10Z"),
+    ];
+    expect(newestBatch(rows).map((r) => r.id)).toEqual([2, 4]);
+  });
+
+  it("handles no rows", () => {
+    expect(newestBatch([])).toEqual([]);
   });
 });

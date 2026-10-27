@@ -4,6 +4,7 @@
   "type": "module",
   "scripts": {
     "sweep": "tsx sweep.ts",
+    "refresh": "tsx sweep.ts --orders-only",
     "test": "vitest run"
   },
   "dependencies": {

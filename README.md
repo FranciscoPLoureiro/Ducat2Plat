@@ -42,7 +42,7 @@ Ducat2Plat is a single-operator tool built to respect all three.
 
 ```mermaid
 graph LR
-    WFM[warframe.market API] -->|daily sweep, 2.5 req/s| Worker[TypeScript worker<br/>GitHub Actions cron]
+    WFM[warframe.market API] -->|daily sweep + 3-hourly listings,<br/>2.5 req/s| Worker[TypeScript worker<br/>GitHub Actions cron]
     BARO[warframestat.us] -->|Baro schedule + inventory| Worker
     Worker -->|idempotent upserts,<br/>service-role key| DB[(Supabase Postgres<br/>RLS: anon read-only)]
     Worker -->|sell signals,<br/>failure alerts| Discord[Discord webhooks]
@@ -73,8 +73,9 @@ tier that the size math says will last years.
 **Batch cadence matched to the economy.** Ducat economics move in days, so
 ingestion is one daily sweep — with one evidence-driven amendment: the merchant
 lands ~13:00 UTC Fridays and a 06:00-only schedule left the advisor blind for
-17 of his 48 hours, so visit Fridays get a second scheduled run. Still batch,
-never reactive.
+17 of his 48 hours, so visit Fridays get a second scheduled run. Listings are
+the exception to "daily": a listings-only refresh replaces the candidate order
+books every ~3h, so bundles don't age a full day. Still batch, never reactive.
 
 **Freshness where it matters, archival where it doesn't.** Specific listings
 decay in hours even though prices don't. The live-bundles endpoint re-fetches
