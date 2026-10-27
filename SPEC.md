@@ -18,6 +18,10 @@ justified — **build exactly what is written here, do not re-architect.**
 
 **Is NOT (explicit non-goals — do not build these):**
 - ❌ No high-frequency order-book snapshotting. One daily sweep is the design.
+  **Amended (2026-10-27):** a listings-only refresh re-fetches the candidate order
+  books every ~3h (§5, §7) so bundles don't age a full day. It *replaces* the
+  sweep's batch instead of adding one, so storage and history stay at one batch per
+  sweep. Anything faster, or keeping every refresh, remains out of scope.
 - ❌ No "burst mode" or real-time reaction to Baro's arrival (he stays 48h; hours of
   latency are irrelevant).
 - ❌ No ML price prediction. Ranking uses simple, transparent formulas defined in §6.
@@ -32,7 +36,7 @@ justified — **build exactly what is written here, do not re-architect.**
 |---|---|---|
 | Database | Supabase (Postgres), free tier | Service-role key used by the worker (unrestricted). **Deviation (2026-07-20):** also present as `SUPABASE_SERVICE_ROLE_KEY` in Vercel's server-only env, used exclusively by `/api/positions/*` route handlers (never sent to the client) to write the `positions` table for the M13 buy/close flow. All other reads go through the anon/publishable key + RLS read-only. |
 | Ingestion worker | Node.js (TypeScript) script, no framework | Single entry point `worker/sweep.ts`. |
-| Scheduler | GitHub Actions cron, once daily | With keepalive so the schedule never auto-disables (§7). |
+| Scheduler | GitHub Actions cron, once daily + a listings-only refresh every ~3h | With keepalive so the schedule never auto-disables (§7). |
 | Frontend | Next.js (App Router), deployed on Vercel free tier | Reads Supabase directly via anon key. |
 | Charts | Any lightweight lib (e.g. Recharts) | Price history + event markers. |
 
@@ -210,6 +214,15 @@ One command, idempotent, safe to re-run. Flow:
 6. **Close sweep**: set `completed_at`, `items_total/ok/failed`; upsert `heartbeat`.
 7. **Retention**: `delete from order_snapshots where captured_at < now() - interval '14 days'`.
 
+**Listings refresh (`npm run refresh`, i.e. `sweep.ts --orders-only`):** re-runs only
+step 4 for the latest *completed* sweep, then swaps batches: it notes the highest
+`order_snapshots.id` before fetching, and after a ≥90%-ok refresh deletes that
+sweep's rows at or below it (under 90%, it deletes its own new rows instead and the
+previous batch stays). Ids are identity-ordered, so no clock agreement is needed.
+It doesn't touch `sweeps` or `heartbeat`; the staleness banner keeps tracking the
+daily sweep. Readers keep only the newest batch of a sweep (rows within 30 min of
+its newest `captured_at`), so a failed delete never doubles listings.
+
 **Failure policy:** individual item failures are logged and skipped (sweep still
 completes if ≥90% ok). If the process crashes, the sweep row simply never gets
 `completed_at` and the dashboard keeps serving the previous complete sweep — this is
@@ -277,6 +290,13 @@ Ducat values are fixed game constants per item; all volatility is in the plat pr
   human commits.
 - Job timeout 30 minutes. On failure the job fails visibly; no retry logic in GHA
   (the next day's sweep self-heals via the 7-day stats window).
+
+`.github/workflows/refresh.yml` (listings refresh, §5):
+
+- `schedule: cron '30 0,3,9,12,15,18,21 * * *'` — every ~3h, skipping 06:30 right
+  after the daily sweep. Same `concurrency` group `sweep`, so it never overlaps one.
+- Steps: checkout → setup Node → `npm ci` → `npm run refresh` → revalidate pages.
+  Timeout 15 minutes; Discord alert on failure (previous listings stay served).
 
 ---
 

@@ -1,0 +1,68 @@
+name: Listings Refresh
+
+# Re-fetches only the candidate order books (~1-2 min, ~175 requests) so the
+# bundles page doesn't age a full day between daily sweeps. Stats, rankings and
+# Baro stay on the daily sweep. Skips 06:30: the 06:00 sweep just did this.
+on:
+  schedule:
+    - cron: '30 0,3,9,12,15,18,21 * * *'
+  workflow_dispatch:
+
+# Same group as the daily sweep, so the two never write order snapshots at once.
+concurrency:
+  group: sweep
+  cancel-in-progress: false
+
+jobs:
+  refresh:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 24
+
+      - name: Pin npm to match committed lockfiles
+        run: npm install -g npm@11.6.2
+
+      - name: Install dependencies
+        working-directory: worker
+        run: npm ci
+
+      - name: Refresh listings
+        working-directory: worker
+        env:
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
+        run: npm run refresh
+
+      - name: Revalidate pages
+        if: success()
+        env:
+          REVALIDATE_URL: ${{ secrets.REVALIDATE_URL }}
+          REVALIDATE_TOKEN: ${{ secrets.REVALIDATE_TOKEN }}
+        run: |
+          if [ -n "$REVALIDATE_URL" ] && [ -n "$REVALIDATE_TOKEN" ]; then
+            curl -sS -f -X POST "$REVALIDATE_URL" \
+              -H "x-revalidate-token: $REVALIDATE_TOKEN" \
+              -H "Content-Type: application/json" \
+              || echo "::warning::Revalidation request failed (non-fatal)"
+          else
+            echo "::notice::REVALIDATE_URL or REVALIDATE_TOKEN not set — skipping revalidation"
+          fi
+
+      - name: Alert refresh failure
+        if: failure()
+        env:
+          DISCORD_WEBHOOK_URL: ${{ secrets.DISCORD_WEBHOOK_URL }}
+        run: |
+          curl -sS -H "Content-Type: application/json" -d '{
+            "embeds": [{
+              "title": "⚠️ Listings Refresh Failed",
+              "description": "The intraday listings refresh failed; the previous listings are still served.\n\n**Workflow:** ${{ github.workflow }}\n**Run:** [View logs](${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }})",
+              "color": 16750848
+            }]
+          }' "$DISCORD_WEBHOOK_URL"

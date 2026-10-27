@@ -275,25 +275,39 @@ export function computeSetSlots(urlNames: string[]): Map<string, number> {
   return slots;
 }
 
+// A sweep's listings are rewritten by the intraday refresh (worker
+// `--orders-only`), which swaps batches. Should a swap ever leave the previous
+// batch behind, keep only the newest one — batches are hours apart, and one
+// batch is written within a few minutes.
+const BATCH_WINDOW_MS = 30 * 60_000;
+export function newestBatch<T extends { captured_at: string }>(rows: T[]): T[] {
+  if (rows.length === 0) return rows;
+  const newest = Math.max(...rows.map((r) => Date.parse(r.captured_at)));
+  return rows.filter((r) => Date.parse(r.captured_at) >= newest - BATCH_WINDOW_MS);
+}
+
 export async function getBundles(): Promise<BundleSeller[]> {
   const db = getSupabase();
   const sweepId = await getLatestSweepId();
   if (!sweepId) return [];
 
-  const orders = await fetchAll<{
-    id: number;
-    item_id: string;
-    price: number;
-    quantity: number;
-    seller_name: string;
-  }>((from, to) =>
-    db
-      .from("order_snapshots")
-      .select("id, item_id, price, quantity, seller_name")
-      .eq("sweep_id", sweepId)
-      .order("price", { ascending: true })
-      .order("id", { ascending: true })
-      .range(from, to),
+  const orders = newestBatch(
+    await fetchAll<{
+      id: number;
+      item_id: string;
+      price: number;
+      quantity: number;
+      seller_name: string;
+      captured_at: string;
+    }>((from, to) =>
+      db
+        .from("order_snapshots")
+        .select("id, item_id, price, quantity, seller_name, captured_at")
+        .eq("sweep_id", sweepId)
+        .order("price", { ascending: true })
+        .order("id", { ascending: true })
+        .range(from, to),
+    ),
   );
 
   if (!orders.length) return [];
