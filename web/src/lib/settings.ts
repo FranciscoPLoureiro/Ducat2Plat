@@ -10,6 +10,7 @@ export interface Settings {
   minVelocity: number | null;
   hide15Ducats: boolean | null; // hide 15-ducat items from bundles
   minItemPpd: number | null; // drop bundle items below this ducats/plat
+  fullTradesOnly: boolean | null; // bundles: plan only completely filled trades
 }
 
 const KEY = "d2p_settings";
@@ -19,6 +20,7 @@ const EMPTY: Settings = {
   minVelocity: null,
   hide15Ducats: null,
   minItemPpd: null,
+  fullTradesOnly: null,
 };
 
 let cache: Settings = EMPTY;
