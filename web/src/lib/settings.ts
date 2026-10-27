@@ -1,6 +1,7 @@
 "use client";
 
 import { useSyncExternalStore } from "react";
+import type { AdTier } from "./wtb-ad";
 
 // Local, per-device preferences. Same server-null pattern as write-token.ts:
 // values must never be server-rendered, so the server snapshot is a constant
@@ -11,6 +12,7 @@ export interface Settings {
   hide15Ducats: boolean | null; // hide 15-ducat items from bundles
   minItemPpd: number | null; // drop bundle items below this ducats/plat
   fullTradesOnly: boolean | null; // bundles: plan only completely filled trades
+  wtbAdTiers: AdTier[] | null; // trade-chat ad: price and on/off per ducat tier
 }
 
 const KEY = "d2p_settings";
@@ -21,6 +23,7 @@ const EMPTY: Settings = {
   hide15Ducats: null,
   minItemPpd: null,
   fullTradesOnly: null,
+  wtbAdTiers: null,
 };
 
 let cache: Settings = EMPTY;
