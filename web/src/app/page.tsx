@@ -4,6 +4,7 @@ import { getBundles } from "@/lib/data";
 import BundlesLive from "./components/bundles-live";
 import StalenessBanner from "./components/staleness-banner";
 import HelpBox from "./components/help-box";
+import WtbAd from "./components/wtb-ad";
 
 export const metadata: Metadata = { title: "Seller Bundles" };
 export const revalidate = 3600;
@@ -27,6 +28,8 @@ export default async function Home() {
           live in-game data at the moment you trade (specific listings go stale within hours).
         </p>
       </header>
+
+      <WtbAd />
 
       <HelpBox>
         <p>

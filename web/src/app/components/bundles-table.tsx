@@ -398,14 +398,16 @@ function SellerRow({
                       Optional — separate message for the items left out of the full trades:
                     </p>
                   )}
-                  <div className="flex items-center gap-2">
+                  <div className="flex items-start gap-2">
                     <button
                       onClick={() => onCopy(part, msg)}
                       className="shrink-0 w-24 px-2 py-1 rounded text-xs border border-zinc-700 text-zinc-300 hover:text-zinc-100 hover:bg-zinc-800 transition-colors"
                     >
                       {copiedPart === part ? "✓ Copied" : `Copy ${part + 1}/${allMsgs.length}`}
                     </button>
-                    <code className="text-[11px] text-zinc-500 truncate">{msg}</code>
+                    <code className="min-w-0 pt-1 text-[11px] text-zinc-500 whitespace-normal break-words">
+                      {msg}
+                    </code>
                   </div>
                 </div>
               ))}
