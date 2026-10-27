@@ -121,13 +121,13 @@ describe("buildWhispers", () => {
     expect(msgs[0]).toContain("Rhino Prime Set (4 parts) 40p");
   });
 
-  it("multi-trade: the opener and every trade fit in one message", () => {
+  it("multi-trade: the opener, then the trades starting a new message at T1", () => {
     const items = Array.from({ length: 8 }, (_, i) => item(`Part ${i}`, 45, 3));
     const msgs = buildWhispers("Seller", items, 24);
     expect(msgs).toEqual([
       "/w Seller Hi! WTB 8 items for 24p total (warframe.market): Part 0 3p, Part 1 3p, Part 2 3p, " +
-        "Part 3 3p, Part 4 3p, Part 5 3p, Part 6 3p, Part 7 3p. 8 parts, 6 per trade = 2 trades: " +
-        "T1: Part 0 + Part 1 + Part 2 + Part 3 + Part 4 + Part 5 (18p) | T2: Part 6 + Part 7 (6p)",
+        "Part 3 3p, Part 4 3p, Part 5 3p, Part 6 3p, Part 7 3p. 8 parts, 6 per trade = 2 trades:",
+      "/w Seller T1: Part 0 + Part 1 + Part 2 + Part 3 + Part 4 + Part 5 (18p) | T2: Part 6 + Part 7 (6p)",
     ]);
   });
 
@@ -136,9 +136,9 @@ describe("buildWhispers", () => {
     expect(msgs).toEqual([
       "/w SomeSeller Hi! WTB 9 Prime sets for 68p total (warframe.market): Trumna 20p, Cedo 13p, Paris 5p, " +
         "2x Braton 5p ea, 4x Burston 5p ea. 37 parts, 6 per trade = 7 trades " +
-        "(a set is paid in the trade that completes it): T1: Trumna set + 2 Cedo parts (20p) | " +
-        "T2: 2 Cedo parts + 4 Paris parts (13p)",
-      "/w SomeSeller + T3: 1 Paris part + 5 Braton parts (10p) | T4: 3 Braton parts + 3 Burston parts (5p) | " +
+        "(a set is paid in the trade that completes it):",
+      "/w SomeSeller T1: Trumna set + 2 Cedo parts (20p) | T2: 2 Cedo parts + 4 Paris parts (13p) | " +
+        "T3: 1 Paris part + 5 Braton parts (10p) | T4: 3 Braton parts + 3 Burston parts (5p) | " +
         "T5: 6 Burston parts (10p) | T6: 6 Burston parts (5p) | T7: 1 Burston part (5p)",
     ]);
   });
@@ -155,8 +155,8 @@ describe("buildWhispers", () => {
     );
     expect(msgs).toEqual([
       "/w Ada Hi! WTB 1 set + 5 parts for 53p total (warframe.market): Rhino set 40p, " +
-        "3x Bronco Prime Barrel 3p ea, 2x Fang Prime Handle 2p ea. 9 parts, 6 per trade = 2 trades: " +
-        "T1: Rhino set + 2x Bronco Prime Barrel (46p) | T2: Bronco Prime Barrel + 2x Fang Prime Handle (7p)",
+        "3x Bronco Prime Barrel 3p ea, 2x Fang Prime Handle 2p ea. 9 parts, 6 per trade = 2 trades:",
+      "/w Ada T1: Rhino set + 2x Bronco Prime Barrel (46p) | T2: Bronco Prime Barrel + 2x Fang Prime Handle (7p)",
     ]);
   });
 
@@ -168,7 +168,9 @@ describe("buildWhispers", () => {
       expect(m.length).toBeLessThanOrEqual(WF_SAFE_LEN);
       expect(m.startsWith(`/w ${longName} `)).toBe(true);
     }
-    expect(msgs.slice(1).every((m) => m.startsWith(`/w ${longName} + T`))).toBe(true);
+    // opener first, then every trade message opens on a trade label
+    expect(msgs[1].startsWith(`/w ${longName} T1: `)).toBe(true);
+    expect(msgs.slice(1).every((m) => m.startsWith(`/w ${longName} T`))).toBe(true);
   });
 
   it("every message is a valid pasteable /w to the same seller", () => {
